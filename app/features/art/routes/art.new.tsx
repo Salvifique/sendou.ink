@@ -6,16 +6,16 @@ import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { useFetcher } from "react-router-dom";
 import { Alert } from "~/components/Alert";
-import { Combobox } from "~/components/Combobox";
-import { FormMessage } from "~/components/FormMessage";
-import { Label } from "~/components/Label";
-import { Main } from "~/components/Main";
 import { SendouButton } from "~/components/elements/Button";
 import { SendouSwitch } from "~/components/elements/Switch";
 import { UserSearch } from "~/components/elements/UserSearch";
+import { FormMessage } from "~/components/FormMessage";
 import { CrossIcon } from "~/components/icons/Cross";
+import { Label } from "~/components/Label";
+import { Main } from "~/components/Main";
 import { useHasRole } from "~/modules/permissions/hooks";
 import invariant from "~/utils/invariant";
+import { logger } from "~/utils/logger";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
 	artPage,
@@ -23,10 +23,10 @@ import {
 	navIconUrl,
 } from "~/utils/urls";
 import { metaTitle } from "../../../utils/remix";
+import { action } from "../actions/art.new.server";
 import { ART } from "../art-constants";
 import { previewUrl } from "../art-utils";
-
-import { action } from "../actions/art.new.server";
+import { TagSelect } from "../components/TagSelect";
 import { loader } from "../loaders/art.new.server";
 export { loader, action };
 
@@ -113,6 +113,7 @@ function ImageUpload({
 }) {
 	const data = useLoaderData<typeof loader>();
 	const { t } = useTranslation(["common"]);
+	const id = React.useId();
 
 	if (data.art) {
 		return (
@@ -125,9 +126,9 @@ function ImageUpload({
 
 	return (
 		<div>
-			<label htmlFor="img-field">{t("common:upload.imageToUpload")}</label>
+			<label htmlFor={id}>{t("common:upload.imageToUpload")}</label>
 			<input
-				id="img-field"
+				id={id}
 				className="plain"
 				type="file"
 				name="img"
@@ -147,7 +148,7 @@ function ImageUpload({
 							setImg(file);
 						},
 						error(err) {
-							console.error(err.message);
+							logger.error(err.message);
 						},
 					});
 
@@ -160,7 +161,7 @@ function ImageUpload({
 							setSmallImg(file);
 						},
 						error(err) {
-							console.error(err.message);
+							logger.error(err.message);
 						},
 					});
 				}}
@@ -174,17 +175,18 @@ function Description() {
 	const { t } = useTranslation(["art"]);
 	const data = useLoaderData<typeof loader>();
 	const [value, setValue] = React.useState(data.art?.description ?? "");
+	const id = React.useId();
 
 	return (
 		<div>
 			<Label
-				htmlFor="description"
+				htmlFor={id}
 				valueLimits={{ current: value.length, max: ART.DESCRIPTION_MAX_LENGTH }}
 			>
 				{t("art:forms.description.title")}
 			</Label>
 			<textarea
-				id="description"
+				id={id}
 				name="description"
 				value={value}
 				onChange={(e) => setValue(e.target.value)}
@@ -205,11 +207,6 @@ function Tags() {
 	);
 	const [newTagValue, setNewTagValue] = React.useState("");
 
-	const existingTags = data.tags;
-	const unselectedTags = existingTags.filter(
-		(t) => !tags.some((tag) => tag.id === t.id),
-	);
-
 	const handleAddNewTag = () => {
 		const normalizedNewTagValue = newTagValue
 			.trim()
@@ -224,7 +221,7 @@ function Tags() {
 			return;
 		}
 
-		const alreadyCreatedTag = existingTags.find(
+		const alreadyCreatedTag = data.tags.find(
 			(t) => t.name === normalizedNewTagValue,
 		);
 
@@ -287,23 +284,14 @@ function Tags() {
 					</SendouButton>
 				</div>
 			) : (
-				<Combobox
+				<TagSelect
 					// empty combobox on select
 					key={tags.length}
-					options={unselectedTags.map((t) => ({
-						label: t.name,
-						value: String(t.id),
-					}))}
-					inputName="tags"
-					placeholder={t("art:forms.tags.searchExisting.placeholder")}
-					initialValue={null}
-					onChange={(selection) => {
-						if (!selection) return;
-						setTags([
-							...tags,
-							{ name: selection.label, id: Number(selection.value) },
-						]);
-					}}
+					tags={data.tags}
+					disabledKeys={tags.map((t) => t.id).filter((id) => id !== undefined)}
+					onSelectionChange={(tagName) =>
+						setTags([...tags, data.tags.find((t) => t.name === tagName)!])
+					}
 				/>
 			)}
 			<div className="text-sm stack sm flex-wrap horizontal">
@@ -398,15 +386,16 @@ function ShowcaseToggle() {
 	const data = useLoaderData<typeof loader>();
 	const isCurrentlyShowcase = Boolean(data.art?.isShowcase);
 	const [checked, setChecked] = React.useState(isCurrentlyShowcase);
+	const id = React.useId();
 
 	return (
 		<div>
-			<label htmlFor="isShowcase">{t("art:forms.showcase.title")}</label>
+			<label htmlFor={id}>{t("art:forms.showcase.title")}</label>
 			<SendouSwitch
 				isSelected={checked}
 				onChange={setChecked}
 				name="isShowcase"
-				id="isShowcase"
+				id={id}
 				isDisabled={isCurrentlyShowcase}
 			/>
 			<FormMessage type="info">{t("art:forms.showcase.info")}</FormMessage>

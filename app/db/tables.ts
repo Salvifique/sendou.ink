@@ -743,6 +743,13 @@ export interface TournamentBracketProgressionOverride {
 	tournamentId: number;
 }
 
+export interface TournamentOrganizationBannedUser {
+	organizationId: number;
+	userId: number;
+	privateNote: string | null;
+	updatedAt: Generated<number>;
+}
+
 /** Indicates a user trusts another. Allows direct adding to groups/teams without invite links. */
 export interface TrustRelationship {
 	trustGiverUserId: number;
@@ -974,6 +981,8 @@ export interface ScrimPost {
 	canceledByUserId: number | null;
 	/** Reason for canceling the scrim */
 	cancelReason: string | null;
+	/** When the post was made was it scheduled for a future time slot (as opposed to looking now) */
+	isScheduledForFuture: Generated<DBBoolean>;
 	createdAt: GeneratedAlways<number>;
 	updatedAt: Generated<number>;
 }
@@ -1110,6 +1119,7 @@ export interface DB {
 	TournamentOrganizationBadge: TournamentOrganizationBadge;
 	TournamentOrganizationSeries: TournamentOrganizationSeries;
 	TournamentBracketProgressionOverride: TournamentBracketProgressionOverride;
+	TournamentOrganizationBannedUser: TournamentOrganizationBannedUser;
 	TrustRelationship: TrustRelationship;
 	UnvalidatedUserSubmittedImage: UnvalidatedUserSubmittedImage;
 	UnvalidatedVideo: UnvalidatedVideo;

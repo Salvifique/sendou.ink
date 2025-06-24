@@ -3,11 +3,10 @@ import clsx from "clsx";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { Ability } from "~/components/Ability";
-import { AllWeaponCombobox } from "~/components/Combobox";
 import { Image, WeaponImage } from "~/components/Image";
 import { Label } from "~/components/Label";
 import { Main } from "~/components/Main";
-import type { AnyWeapon, DamageType } from "~/features/build-analyzer";
+import type { DamageType } from "~/features/build-analyzer";
 import { possibleApValues } from "~/features/build-analyzer";
 import {
 	BIG_BUBBLER_ID,
@@ -17,20 +16,18 @@ import {
 	SPLASH_WALL_ID,
 	SPRINKLER_ID,
 	SQUID_BEAKON_ID,
-	TORPEDO_ID,
-	WAVE_BREAKER_ID,
-} from "~/modules/in-game-lists/weapon-ids";
-import {
 	SUPER_CHUMP_ID,
+	TORPEDO_ID,
 	TRIPLE_SPLASHDOWN_ID,
+	WAVE_BREAKER_ID,
 } from "~/modules/in-game-lists/weapon-ids";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
-	OBJECT_DAMAGE_CALCULATOR_URL,
 	mainWeaponImageUrl,
 	mainWeaponVariantImageUrl,
 	modeImageUrl,
 	navIconUrl,
+	OBJECT_DAMAGE_CALCULATOR_URL,
 	specialWeaponImageUrl,
 	specialWeaponVariantImageUrl,
 	subWeaponImageUrl,
@@ -40,6 +37,7 @@ import type { DamageReceiver } from "../calculator-types";
 import "../calculator.css";
 import type { MetaFunction } from "@remix-run/node";
 import { SendouSwitch } from "~/components/elements/Switch";
+import { WeaponSelect } from "~/components/WeaponSelect";
 import { metaTags } from "~/utils/remix";
 
 export const CURRENT_PATCH = "10.0";
@@ -84,22 +82,13 @@ export default function ObjectDamagePage() {
 				<div className="object-damage__selects">
 					<div className="object-damage__selects__weapon">
 						<Label htmlFor="weapon">{t("analyzer:labels.weapon")}</Label>
-						<AllWeaponCombobox
-							id="weapon"
-							inputName="weapon"
-							onChange={(opt) => {
-								if (!opt) return;
-
-								const [type, id] = opt.value.split("_");
-
+						<WeaponSelect
+							includeSubSpecial
+							onChange={(newAnyWeapon) => {
 								handleChange({
-									newAnyWeapon: {
-										id: Number(id),
-										type,
-									} as AnyWeapon,
+									newAnyWeapon,
 								});
 							}}
-							fullWidth
 						/>
 					</div>
 					{allDamageTypes.length > 0 ? (

@@ -14,19 +14,22 @@ import { MapPool } from "~/features/map-list-generator/core/map-pool";
 import * as NotificationRepository from "~/features/notifications/NotificationRepository.server";
 import type { Notification } from "~/features/notifications/notifications-types";
 import * as PlusSuggestionRepository from "~/features/plus-suggestions/PlusSuggestionRepository.server";
-import * as PlusVotingRepository from "~/features/plus-voting/PlusVotingRepository.server";
 import {
 	lastCompletedVoting,
 	nextNonCompletedVoting,
 	rangeToMonthYear,
 } from "~/features/plus-voting/core";
+import * as PlusVotingRepository from "~/features/plus-voting/PlusVotingRepository.server";
 import * as ScrimPostRepository from "~/features/scrims/ScrimPostRepository.server";
-import * as QMatchRepository from "~/features/sendouq-match/QMatchRepository.server";
+import * as QRepository from "~/features/sendouq/QRepository.server";
+import { addMember } from "~/features/sendouq/queries/addMember.server";
+import { createMatch } from "~/features/sendouq/queries/createMatch.server";
 import { calculateMatchSkills } from "~/features/sendouq-match/core/skills.server";
 import {
 	summarizeMaps,
 	summarizePlayerResults,
 } from "~/features/sendouq-match/core/summarizer.server";
+import * as QMatchRepository from "~/features/sendouq-match/QMatchRepository.server";
 import { winnersArrayToWinner } from "~/features/sendouq-match/q-match-utils";
 import { addMapResults } from "~/features/sendouq-match/queries/addMapResults.server";
 import { addPlayerResults } from "~/features/sendouq-match/queries/addPlayerResults.server";
@@ -35,15 +38,12 @@ import { addSkills } from "~/features/sendouq-match/queries/addSkills.server";
 import { findMatchById } from "~/features/sendouq-match/queries/findMatchById.server";
 import { reportScore } from "~/features/sendouq-match/queries/reportScore.server";
 import { setGroupAsInactive } from "~/features/sendouq-match/queries/setGroupAsInactive.server";
-import * as QSettingsRepository from "~/features/sendouq-settings/QSettingsRepository.server";
 import { BANNED_MAPS } from "~/features/sendouq-settings/banned-maps";
+import * as QSettingsRepository from "~/features/sendouq-settings/QSettingsRepository.server";
 import { AMOUNT_OF_MAPS_IN_POOL_PER_MODE } from "~/features/sendouq-settings/q-settings-constants";
-import * as QRepository from "~/features/sendouq/QRepository.server";
-import { addMember } from "~/features/sendouq/queries/addMember.server";
-import { createMatch } from "~/features/sendouq/queries/createMatch.server";
+import { TOURNAMENT } from "~/features/tournament/tournament-constants";
 import { clearAllTournamentDataCache } from "~/features/tournament-bracket/core/Tournament.server";
 import * as TournamentOrganizationRepository from "~/features/tournament-organization/TournamentOrganizationRepository.server";
-import { TOURNAMENT } from "~/features/tournament/tournament-constants";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
 import { createVod } from "~/features/vods/queries/createVod.server";
 import {
@@ -56,8 +56,7 @@ import {
 	headGearIds,
 	shoesGearIds,
 } from "~/modules/in-game-lists/gear-ids";
-import { modesShort } from "~/modules/in-game-lists/modes";
-import { rankedModesShort } from "~/modules/in-game-lists/modes";
+import { modesShort, rankedModesShort } from "~/modules/in-game-lists/modes";
 import { stageIds } from "~/modules/in-game-lists/stage-ids";
 import type {
 	AbilityType,
@@ -128,6 +127,7 @@ const basicSeeds = (variation?: SeedVariation | null) => [
 	badgesToUsers,
 	badgeManagers,
 	patrons,
+	organization,
 	calendarEvents,
 	calendarEventBadges,
 	calendarEventResults,
@@ -175,17 +175,13 @@ const basicSeeds = (variation?: SeedVariation | null) => [
 	scrimPostRequests,
 	associations,
 	notifications,
-	organization,
 ];
 
 export async function seed(variation?: SeedVariation | null) {
 	wipeDB();
 
-	let count = 0;
 	for (const seedFunc of basicSeeds(variation)) {
 		if (!seedFunc) continue;
-
-		count++;
 
 		faker.seed(5800);
 
@@ -198,6 +194,7 @@ export async function seed(variation?: SeedVariation | null) {
 function wipeDB() {
 	const tablesToDelete = [
 		"ScrimPost",
+		"TournamentOrganizationBannedUser",
 		"Association",
 		"LFGPost",
 		"Skill",
@@ -524,7 +521,7 @@ async function lastMonthsVoting() {
 
 	const { month, year } = lastCompletedVoting(new Date());
 
-	const fiveMinutesAgo = new Date(new Date().getTime() - 5 * 60 * 1000);
+	const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 
 	for (let i = 1; i < 151; i++) {
 		if (i === NZAP_TEST_ID) continue; // omit N-ZAP user for testing;
@@ -1095,7 +1092,8 @@ function calendarEventWithToTools(
         "discordInviteCode",
         "bracketUrl",
         "authorId",
-        "tournamentId"
+        "tournamentId",
+				"organizationId"
       ) values (
         $id,
         $name,
@@ -1103,7 +1101,8 @@ function calendarEventWithToTools(
         $discordInviteCode,
         $bracketUrl,
         $authorId,
-        $tournamentId
+        $tournamentId,
+				$organizationId
       )
       `,
 		)
@@ -1115,6 +1114,7 @@ function calendarEventWithToTools(
 			bracketUrl: faker.internet.url(),
 			authorId: ADMIN_ID,
 			tournamentId,
+			organizationId: event === "PICNIC" ? 1 : null,
 		});
 
 	const halfAnHourFromNow = new Date(Date.now() + 1000 * 60 * 30);
@@ -2367,6 +2367,7 @@ async function scrimPosts() {
 		const divs = divRange();
 		await ScrimPostRepository.insert({
 			at: date(),
+			isScheduledForFuture: true,
 			maxDiv: divs?.maxDiv,
 			minDiv: divs?.minDiv,
 			teamId: team(),
@@ -2382,6 +2383,7 @@ async function scrimPosts() {
 
 	const adminPostId = await ScrimPostRepository.insert({
 		at: date(true), // admin's scrim is always at least 1 hour in the future
+		isScheduledForFuture: true,
 		text:
 			faker.number.float(1) > 0.5
 				? faker.lorem.sentences({ min: 1, max: 5 })

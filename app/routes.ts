@@ -1,7 +1,7 @@
 import {
-	type RouteConfig,
 	index,
 	prefix,
+	type RouteConfig,
 	route,
 } from "@remix-run/route-config";
 
@@ -68,7 +68,6 @@ export default [
 			":id/report-winners",
 			"features/calendar/routes/calendar.$id.report-winners.tsx",
 		),
-		route("map-pool-events", "features/calendar/routes/map-pool-events.ts"),
 	]),
 	route("/calendar.ics", "features/calendar/routes/calendar.ics.tsx"),
 
