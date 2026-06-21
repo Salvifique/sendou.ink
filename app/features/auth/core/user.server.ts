@@ -1,51 +1,46 @@
-import { redirect } from "@remix-run/node";
-import type { Tables } from "~/db/tables";
-import { userIsBanned } from "~/features/ban/core/banned.server";
-import * as UserRepository from "~/features/user-page/UserRepository.server";
-import { SUSPENDED_PAGE } from "~/utils/urls";
 import { IMPERSONATED_SESSION_KEY, SESSION_KEY } from "./authenticator.server";
 import { authSessionStorage } from "./session.server";
+import {
+	type AuthenticatedUser,
+	getUserContext,
+	userAsyncLocalStorage,
+} from "./user-context.server";
 
-export async function getUserId(
-	request: Request,
-	redirectIfBanned = true,
-): Promise<Pick<Tables["User"], "id"> | undefined> {
-	const session = await authSessionStorage.getSession(
-		request.headers.get("Cookie"),
-	);
+export type { AuthenticatedUser };
 
-	const userId =
-		session.get(IMPERSONATED_SESSION_KEY) ?? session.get(SESSION_KEY);
-
-	if (!userId) return;
-
-	if (userIsBanned(userId) && redirectIfBanned) throw redirect(SUSPENDED_PAGE);
-
-	return { id: userId };
+export function getUser(): AuthenticatedUser | undefined {
+	const context = getUserContext();
+	return context.user;
 }
 
-export async function getUser(request: Request, redirectIfBanned = true) {
-	const userId = (await getUserId(request, redirectIfBanned))?.id;
-
-	if (!userId) return;
-
-	return UserRepository.findLeanById(userId);
-}
-
-export async function requireUserId(request: Request) {
-	const user = await getUserId(request);
+export function requireUser(): AuthenticatedUser {
+	const user = getUser();
 
 	if (!user) throw new Response(null, { status: 401 });
 
 	return user;
 }
 
-export async function requireUser(request: Request) {
-	const user = await getUser(request);
+/** Id of the acting user, from request context. Throws an Error if there is no
+ *  authenticated user (e.g. called outside a request) — repositories rely on a
+ *  bouncer having already enforced auth, so absence here is a bug, not a 401. */
+export function actorId(): number {
+	const id = actorIdOrNull();
+	if (id === null) throw new Error("No acting user in context");
+	return id;
+}
 
-	if (!user) throw new Response(null, { status: 401 });
+/** Id of the acting user, or null when unauthenticated. Use for reads that
+ *  also serve anonymous visitors, where the actor only scopes the result. */
+export function actorIdOrNull(): number | null {
+	return getUser()?.id ?? null;
+}
 
-	return user;
+/** Id of the acting user, or null when there is no actor *or* no request
+ *  context at all (e.g. cron routines). Never throws, unlike actorIdOrNull —
+ *  use for ambient side effects that may also run outside of a request. */
+export function actorIdOrNullSafe(): number | null {
+	return userAsyncLocalStorage.getStore()?.user?.id ?? null;
 }
 
 export async function isImpersonating(request: Request) {
@@ -54,4 +49,14 @@ export async function isImpersonating(request: Request) {
 	);
 
 	return Boolean(session.get(IMPERSONATED_SESSION_KEY));
+}
+
+export async function getRealUserId(
+	request: Request,
+): Promise<number | undefined> {
+	const session = await authSessionStorage.getSession(
+		request.headers.get("Cookie"),
+	);
+
+	return session.get(SESSION_KEY) as number | undefined;
 }

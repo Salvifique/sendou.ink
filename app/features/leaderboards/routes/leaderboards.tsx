@@ -1,7 +1,7 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import { Link, useLoaderData, useSearchParams } from "@remix-run/react";
 import React from "react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { TierImage, WeaponImage } from "~/components/Image";
 import { Main } from "~/components/Main";
@@ -10,7 +10,7 @@ import { ordinalToSp } from "~/features/mmr/mmr-utils";
 import type { SkillTierInterval } from "~/features/mmr/tiered.server";
 import { rankedModesShort } from "~/modules/in-game-lists/modes";
 import { weaponCategories } from "~/modules/in-game-lists/weapon-ids";
-import { metaTags } from "~/utils/remix";
+import { metaTags, type SerializeFrom } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
 	LEADERBOARDS_PAGE,
@@ -19,10 +19,10 @@ import {
 	topSearchPlayerPage,
 	userPage,
 	userSeasonsPage,
-	userSubmittedImage,
 } from "~/utils/urls";
 import { InfoPopover } from "../../../components/InfoPopover";
 import { TopTenPlayer } from "../components/TopTenPlayer";
+import type { XPLeaderboardItem } from "../LeaderboardRepository.server";
 import {
 	LEADERBOARD_TYPES,
 	SEASON_SEARCH_PARAM_KEY,
@@ -30,10 +30,10 @@ import {
 } from "../leaderboards-constants";
 import { seasonHasTopTen } from "../leaderboards-utils";
 import { loader } from "../loaders/leaderboards.server";
-import type { XPLeaderboardItem } from "../queries/XPLeaderboard.server";
+
 export { loader };
 
-import "../../top-search/top-search.css";
+import styles from "../../top-search/top-search.module.css";
 
 export const handle: SendouRouteHandle = {
 	i18n: ["vods"],
@@ -108,10 +108,13 @@ export default function LeaderboardsPage() {
 				value={selectValue()}
 				onChange={(e) => {
 					const [type, season] = e.target.value.split(";");
-					setSearchParams({
-						[TYPE_SEARCH_PARAM_KEY]: type,
-						[SEASON_SEARCH_PARAM_KEY]: season,
-					});
+					setSearchParams(
+						{
+							[TYPE_SEARCH_PARAM_KEY]: type,
+							[SEASON_SEARCH_PARAM_KEY]: season,
+						},
+						{ replace: true },
+					);
 				}}
 			>
 				{Seasons.allStarted().map((season) => {
@@ -242,7 +245,7 @@ function OwnEntryPeek({
 	return (
 		<div>
 			{entry.firstOfTier ? (
-				<div className="placements__tier-header">
+				<div className={styles.tierHeader}>
 					<TierImage tier={entry.firstOfTier} width={32} />
 					{entry.firstOfTier.name}
 					{entry.firstOfTier.isPlus ? "+" : ""}
@@ -251,24 +254,24 @@ function OwnEntryPeek({
 			<div>
 				<Link
 					to={userSeasonsPage({ user: entry, season: data.season })}
-					className="placements__table__row"
+					className={styles.tableRow}
 				>
-					<div className="placements__table__inner-row">
-						<div className="placements__table__rank">{entry.placementRank}</div>
+					<div className={styles.tableInnerRow}>
+						<div className={styles.tableRank}>{entry.placementRank}</div>
 						<div>
 							<Avatar size="xxs" user={entry} />
 						</div>
 						{typeof entry.weaponSplId === "number" ? (
 							<WeaponImage
-								className="placements__table__weapon"
+								className={styles.tableWeapon}
 								variant="build"
 								weaponSplId={entry.weaponSplId}
 								width={32}
 								height={32}
 							/>
 						) : null}
-						<div className="placements__table__name">{entry.username}</div>
-						<div className="placements__table__power">{entry.power}</div>
+						<div className={styles.tableName}>{entry.username}</div>
+						<div className={styles.tablePower}>{entry.power}</div>
 					</div>
 				</Link>
 			</div>
@@ -295,7 +298,7 @@ function PlayersTable({
 	const data = useLoaderData<typeof loader>();
 
 	return (
-		<div className="placements__table">
+		<div className={styles.table}>
 			{entries
 				// hide normal rows that are showed in "fancy" top 10 format
 				.filter((_, i) => !showingTopTen || i > 9)
@@ -303,7 +306,7 @@ function PlayersTable({
 					return (
 						<React.Fragment key={entry.entryId}>
 							{entry.firstOfTier && showTiers ? (
-								<div className="placements__tier-header">
+								<div className={styles.tierHeader}>
 									<TierImage tier={entry.firstOfTier} width={32} />
 									{entry.firstOfTier.name}
 									{entry.firstOfTier.isPlus ? "+" : ""}
@@ -311,33 +314,29 @@ function PlayersTable({
 							) : null}
 							<Link
 								to={userSeasonsPage({ user: entry, season: data.season })}
-								className="placements__table__row"
+								className={styles.tableRow}
 							>
-								<div className="placements__table__inner-row">
-									<div className="placements__table__rank">
-										{entry.placementRank}
-									</div>
+								<div className={styles.tableInnerRow}>
+									<div className={styles.tableRank}>{entry.placementRank}</div>
 									<div>
 										<Avatar size="xxs" user={entry} />
 									</div>
 									{typeof entry.weaponSplId === "number" ? (
 										<WeaponImage
-											className="placements__table__weapon"
+											className={styles.tableWeapon}
 											variant="build"
 											weaponSplId={entry.weaponSplId}
 											width={32}
 											height={32}
 										/>
 									) : null}
-									<div className="placements__table__name">
-										{entry.username}
-									</div>
+									<div className={styles.tableName}>{entry.username}</div>
 									{entry.pendingPlusTier ? (
 										<div className="text-xs text-theme whitespace-nowrap">
 											➜ +{entry.pendingPlusTier}
 										</div>
 									) : null}
-									<div className="placements__table__power">
+									<div className={styles.tablePower}>
 										{entry.power.toFixed(2)}
 									</div>
 								</div>
@@ -363,26 +362,22 @@ function TeamTable({
 		_showQualificationDividers && isCurrentSeason && entries.length > 20;
 
 	return (
-		<div className="placements__table">
+		<div className={styles.table}>
 			{entries.map((entry, i) => {
 				return (
 					<React.Fragment key={entry.entryId}>
-						<div className="placements__table__row">
-							<div className="placements__table__inner-row">
-								<div className="placements__table__rank">
-									{entry.placementRank}
-								</div>
+						<div className={styles.tableRow}>
+							<div className={styles.tableInnerRow}>
+								<div className={styles.tableRank}>{entry.placementRank}</div>
 								{entry.team?.avatarUrl ? (
 									<Link
-										// TODO: can be made better when $narrowNotNull lands
-										to={teamPage(entry.team.customUrl!)}
-										// TODO: can be made better when $narrowNotNull lands
-										title={entry.team.name!}
+										to={teamPage(entry.team.customUrl)}
+										title={entry.team.name}
 									>
 										<Avatar
 											size="xxs"
-											url={userSubmittedImage(entry.team.avatarUrl)}
-											className="placements__avatar"
+											url={entry.team.avatarUrl}
+											className={styles.avatar}
 										/>
 									</Link>
 								) : null}
@@ -396,13 +391,15 @@ function TeamTable({
 										);
 									})}
 								</div>
-								<div className="placements__table__power">
+								<div className={styles.tablePower}>
 									{entry.power.toFixed(2)}
 								</div>
 							</div>
 						</div>
 						{i === 11 && showQualificationDividers ? (
-							<div className="placements__table__row placements__table__row__qualification">
+							<div
+								className={`${styles.tableRow} ${styles.tableRowQualification}`}
+							>
 								{t("common:leaderboard.qualification")}
 								<InfoPopover tiny>
 									{t("common:leaderboard.qualification.info")}
@@ -418,32 +415,28 @@ function TeamTable({
 
 function XPTable({ entries }: { entries: XPLeaderboardItem[] }) {
 	return (
-		<div className="placements__table">
+		<div className={styles.table}>
 			{entries.map((entry) => {
 				return (
 					<Link
 						to={topSearchPlayerPage(entry.playerId)}
 						key={entry.entryId}
-						className="placements__table__row"
+						className={styles.tableRow}
 					>
-						<div className="placements__table__inner-row">
-							<div className="placements__table__rank">
-								{entry.placementRank}
-							</div>
+						<div className={styles.tableInnerRow}>
+							<div className={styles.tableRank}>{entry.placementRank}</div>
 							{entry.discordId ? (
 								<Avatar size="xxs" user={entry as any} />
 							) : null}
 							<WeaponImage
-								className="placements__table__weapon"
+								className={styles.tableWeapon}
 								variant="build"
 								weaponSplId={entry.weaponSplId}
 								width={32}
 								height={32}
 							/>
 							<div>{entry.name}</div>
-							<div className="placements__table__power">
-								{entry.power.toFixed(1)}
-							</div>
+							<div className={styles.tablePower}>{entry.power.toFixed(1)}</div>
 						</div>
 					</Link>
 				);

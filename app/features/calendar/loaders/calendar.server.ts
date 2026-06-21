@@ -1,4 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import { add, sub } from "date-fns";
+import type { LoaderFunctionArgs } from "react-router";
 import type { UserPreferences } from "~/db/tables";
 import { getUser } from "~/features/auth/core/user.server";
 import { DAYS_SHOWN_AT_A_TIME } from "~/features/calendar/calendar-constants";
@@ -15,7 +16,7 @@ import * as CalendarEvent from "../core/CalendarEvent";
 export type CalendarLoaderData = SerializeFrom<typeof loader>;
 
 export const loader = async (args: LoaderFunctionArgs) => {
-	const user = await getUser(args.request);
+	const user = getUser();
 	const parsed = parseSafeSearchParams({
 		request: args.request,
 		schema: dayMonthYear,
@@ -27,12 +28,10 @@ export const loader = async (args: LoaderFunctionArgs) => {
 			).getTime()
 		: Date.now();
 
-	const twentyFourHoursAgo = date - 24 * 60 * 60 * 1000;
-	const fiveDaysFromNow = date + DAYS_SHOWN_AT_A_TIME * 24 * 60 * 60 * 1000;
-
 	const events = await CalendarRepository.findAllBetweenTwoTimestamps({
-		startTime: new Date(twentyFourHoursAgo),
-		endTime: new Date(fiveDaysFromNow),
+		// add a bit of tolerance to the timestamps to account for timezones
+		startTime: sub(new Date(date), { hours: 24 }),
+		endTime: add(new Date(date), { days: DAYS_SHOWN_AT_A_TIME + 1 }),
 	});
 
 	const filters = resolveFilters(args.request, user?.preferences);

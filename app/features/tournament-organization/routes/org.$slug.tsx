@@ -1,28 +1,31 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import { Link, useLoaderData, useSearchParams } from "@remix-run/react";
+import { Link as LinkIcon, Lock, LogOut, SquarePen, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData, useSearchParams } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { Divider } from "~/components/Divider";
-import { LinkButton } from "~/components/elements/Button";
+import { LinkButton, SendouButton } from "~/components/elements/Button";
+import { SendouDialog } from "~/components/elements/Dialog";
 import {
 	SendouTab,
 	SendouTabList,
 	SendouTabPanel,
 	SendouTabs,
 } from "~/components/elements/Tabs";
+import { FormWithConfirm } from "~/components/FormWithConfirm";
 import { Image } from "~/components/Image";
-import { EditIcon } from "~/components/icons/Edit";
-import { LinkIcon } from "~/components/icons/Link";
-import { LockIcon } from "~/components/icons/Lock";
-import { UsersIcon } from "~/components/icons/Users";
+import { LocaleTime } from "~/components/LocaleTime";
 import { Main } from "~/components/Main";
 import { Pagination } from "~/components/Pagination";
 import { Placement } from "~/components/Placement";
+import { TierPill } from "~/components/TierPill";
+import { useUser } from "~/features/auth/core/user";
 import { BadgeDisplay } from "~/features/badges/components/BadgeDisplay";
 import { BannedUsersList } from "~/features/tournament-organization/components/BannedPlayersList";
-import { useHasPermission } from "~/modules/permissions/hooks";
+import { SendouForm } from "~/form/SendouForm";
+import { useHasPermission, useHasRole } from "~/modules/permissions/hooks";
 import { databaseTimestampNow, databaseTimestampToDate } from "~/utils/dates";
-import { metaTags } from "~/utils/remix";
+import { metaTags, type SerializeFrom } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
 	BLANK_IMAGE_URL,
@@ -32,16 +35,16 @@ import {
 	tournamentOrganizationPage,
 	tournamentPage,
 	userPage,
-	userSubmittedImage,
 } from "~/utils/urls";
 import { action } from "../actions/org.$slug.server";
 import { EventCalendar } from "../components/EventCalendar";
 import { SocialLinksList } from "../components/SocialLinksList";
 import { loader } from "../loaders/org.$slug.server";
+import styles from "../tournament-organization.module.css";
 import { TOURNAMENT_SERIES_EVENTS_PER_PAGE } from "../tournament-organization-constants";
-export { action, loader };
+import { updateIsEstablishedSchema } from "../tournament-organization-schemas";
 
-import "../tournament-organization.css";
+export { action, loader };
 
 export const meta: MetaFunction<typeof loader> = (args) => {
 	if (!args.data) return [];
@@ -52,7 +55,7 @@ export const meta: MetaFunction<typeof loader> = (args) => {
 		description: args.data.organization.description ?? undefined,
 		image: args.data.organization.avatarUrl
 			? {
-					url: userSubmittedImage(args.data.organization.avatarUrl),
+					url: args.data.organization.avatarUrl,
 					dimensions: { width: 124, height: 124 },
 				}
 			: undefined,
@@ -69,13 +72,12 @@ export const handle: SendouRouteHandle = {
 		return [
 			data.organization.avatarUrl
 				? {
-						imgPath: userSubmittedImage(data.organization.avatarUrl),
+						imgPath: data.organization.avatarUrl,
 						href: tournamentOrganizationPage({
 							organizationSlug: data.organization.slug,
 						}),
 						type: "IMAGE",
 						text: data.organization.name,
-						rounded: true,
 					}
 				: {
 						type: "TEXT",
@@ -108,33 +110,70 @@ export default function TournamentOrganizationPage() {
 }
 
 function LogoHeader() {
-	const { t } = useTranslation(["common"]);
+	const { t } = useTranslation(["common", "org"]);
 	const data = useLoaderData<typeof loader>();
+	const user = useUser();
 	const canEditOrganization = useHasPermission(data.organization, "EDIT");
+
+	const currentMember = user
+		? data.organization.members.find((m) => m.id === user.id)
+		: undefined;
+	const isSoleAdmin =
+		currentMember?.role === "ADMIN" &&
+		data.organization.members.filter((m) => m.role === "ADMIN").length === 1;
 
 	return (
 		<div className="stack horizontal md">
-			<Avatar
-				size="lg"
-				url={
-					data.organization.avatarUrl
-						? userSubmittedImage(data.organization.avatarUrl)
-						: undefined
-				}
-			/>
+			<Avatar size="lg" url={data.organization.avatarUrl ?? undefined} />
 			<div className="stack sm">
 				<div className="text-xl font-bold">{data.organization.name}</div>
-				{canEditOrganization ? (
-					<div className="stack items-start">
-						<LinkButton
-							to={tournamentOrganizationEditPage(data.organization.slug)}
-							icon={<EditIcon />}
-							size="small"
-							variant="outlined"
-							testId="edit-org-button"
-						>
-							{t("common:actions.edit")}
-						</LinkButton>
+				{canEditOrganization || currentMember ? (
+					<div className="stack horizontal sm items-start">
+						{canEditOrganization ? (
+							<LinkButton
+								to={tournamentOrganizationEditPage(data.organization.slug)}
+								icon={<SquarePen />}
+								size="small"
+								variant="outlined"
+								testId="edit-org-button"
+							>
+								{t("common:actions.edit")}
+							</LinkButton>
+						) : null}
+						{currentMember ? (
+							isSoleAdmin ? (
+								<SendouDialog
+									showHeading={false}
+									trigger={
+										<SendouButton
+											icon={<LogOut />}
+											size="small"
+											variant="destructive"
+										>
+											{t("org:leave.action")}
+										</SendouButton>
+									}
+								>
+									<p>{t("org:leave.soleAdmin")}</p>
+								</SendouDialog>
+							) : (
+								<FormWithConfirm
+									dialogHeading={t("org:leave.confirm", {
+										organizationName: data.organization.name,
+									})}
+									fields={[["_action", "LEAVE_ORGANIZATION"]]}
+									submitButtonText={t("org:leave.action")}
+								>
+									<SendouButton
+										icon={<LogOut />}
+										size="small"
+										variant="destructive"
+									>
+										{t("org:leave.action")}
+									</SendouButton>
+								</FormWithConfirm>
+							)
+						) : null}
 					</div>
 				) : null}
 				<div className="whitespace-pre-wrap text-sm text-lighter">
@@ -148,6 +187,7 @@ function LogoHeader() {
 function InfoTabs() {
 	const { t } = useTranslation(["org"]);
 	const data = useLoaderData<typeof loader>();
+	const isAdmin = useHasRole("ADMIN");
 	const canBanPlayers = useHasPermission(data.organization, "BAN");
 
 	const hasSocials =
@@ -161,7 +201,7 @@ function InfoTabs() {
 					<SendouTab id="socials" isDisabled={!hasSocials} icon={<LinkIcon />}>
 						{t("org:edit.form.socialLinks.title")}
 					</SendouTab>
-					<SendouTab id="members" icon={<UsersIcon />}>
+					<SendouTab id="members" icon={<Users />}>
 						{t("org:edit.form.members.title")}
 					</SendouTab>
 					<SendouTab
@@ -174,10 +214,15 @@ function InfoTabs() {
 					{canBanPlayers && data.bannedUsers ? (
 						<SendouTab
 							id="banned-users"
-							icon={<LockIcon />}
+							icon={<Lock />}
 							data-testid="banned-users-tab"
 						>
 							{t("org:banned.title")}
+						</SendouTab>
+					) : null}
+					{isAdmin ? (
+						<SendouTab id="admin" icon={<Lock />}>
+							Admin
 						</SendouTab>
 					) : null}
 				</SendouTabList>
@@ -195,7 +240,39 @@ function InfoTabs() {
 						<BannedUsersList bannedUsers={data.bannedUsers} />
 					</SendouTabPanel>
 				) : null}
+				{isAdmin ? (
+					<SendouTabPanel id="admin">
+						<AdminControls />
+					</SendouTabPanel>
+				) : null}
 			</SendouTabs>
+		</div>
+	);
+}
+
+function AdminControls() {
+	const data = useLoaderData<typeof loader>();
+
+	return (
+		<div className="stack sm">
+			<SendouForm
+				className=""
+				schema={updateIsEstablishedSchema}
+				defaultValues={{
+					isEstablished: Boolean(data.organization.isEstablished),
+				}}
+				autoSubmit
+			>
+				{({ FormField }) => <FormField name="isEstablished" />}
+			</SendouForm>
+			<FormWithConfirm
+				dialogHeading={`Delete organization "${data.organization.name}"?`}
+				fields={[["_action", "DELETE_ORGANIZATION"]]}
+			>
+				<SendouButton variant="minimal-destructive">
+					Delete organization
+				</SendouButton>
+			</FormWithConfirm>
 		</div>
 	);
 }
@@ -231,14 +308,14 @@ function AllTournamentsView() {
 	const data = useLoaderData<typeof loader>();
 
 	return (
-		<div className="org__events-container">
+		<div className={styles.eventsContainer}>
 			<EventCalendar
 				month={data.month}
 				year={data.year}
 				events={data.events}
 				fallbackLogoUrl={
 					data.organization.avatarUrl
-						? userSubmittedImage(data.organization.avatarUrl)
+						? data.organization.avatarUrl
 						: BLANK_IMAGE_URL
 				}
 			/>
@@ -294,7 +371,7 @@ function SeriesHeader({
 }: {
 	series: NonNullable<SerializeFrom<typeof loader>["series"]>;
 }) {
-	const { i18n, t } = useTranslation(["org"]);
+	const { t } = useTranslation(["org"]);
 
 	return (
 		<div className="stack md">
@@ -309,17 +386,20 @@ function SeriesHeader({
 					/>
 				) : null}
 				<div>
-					<h2 className="text-lg">{series.name}</h2>
+					<div className="stack horizontal sm items-center">
+						<h2 className="text-lg">{series.name}</h2>
+						{series.tentativeTier ? (
+							<TierPill tier={series.tentativeTier} />
+						) : null}
+					</div>
 					{series.established ? (
 						<div className="text-lighter text-italic text-xs">
 							{t("org:events.established.short")}{" "}
-							{databaseTimestampToDate(series.established).toLocaleDateString(
-								i18n.language,
-								{
-									month: "long",
-									year: "numeric",
-								},
-							)}
+							<LocaleTime
+								date={series.established}
+								options={{ month: "numeric", year: "numeric" }}
+								inline
+							/>
 						</div>
 					) : null}
 				</div>
@@ -410,7 +490,7 @@ function EventsList({
 }
 
 function SectionDivider({ children }: { children: React.ReactNode }) {
-	return <div className="org__section-divider">{children}</div>;
+	return <div className={styles.sectionDivider}>{children}</div>;
 }
 
 function EventInfo({
@@ -420,8 +500,6 @@ function EventInfo({
 	event: SerializeFrom<typeof loader>["events"][number];
 	showYear?: boolean;
 }) {
-	const { i18n } = useTranslation();
-
 	return (
 		<div className="stack sm">
 			<Link
@@ -430,62 +508,72 @@ function EventInfo({
 						? tournamentPage(event.tournamentId)
 						: calendarEventPage(event.eventId)
 				}
-				className="org__event-info"
+				className={styles.eventInfo}
 			>
 				{event.logoUrl ? (
 					<img src={event.logoUrl} alt={event.name} width={38} height={38} />
 				) : null}
 				<div>
-					<div className="org__event-info__name">{event.name}</div>
-					<time className="org__event-info__time" suppressHydrationWarning>
-						{databaseTimestampToDate(event.startTime).toLocaleString(
-							i18n.language,
-							{
-								day: "numeric",
-								month: "numeric",
-								hour: "numeric",
-								minute: "numeric",
-								year: showYear ? "numeric" : undefined,
-							},
-						)}
-					</time>
+					<div>{event.name}</div>
+					<LocaleTime
+						date={event.startTime}
+						options={{
+							day: "numeric",
+							month: "numeric",
+							hour: "numeric",
+							minute: "numeric",
+							year: showYear ? "numeric" : undefined,
+						}}
+						className={styles.eventInfoTime}
+					/>
 				</div>
 			</Link>
-			{event.tournamentWinners || event.eventWinners ? (
-				<EventWinners winner={event.tournamentWinners ?? event.eventWinners!} />
-			) : null}
+			<EventWinners
+				tournamentWinners={event.tournamentWinners}
+				eventWinners={event.eventWinners}
+			/>
 		</div>
 	);
 }
 
 function EventWinners({
-	winner,
+	tournamentWinners,
+	eventWinners,
 }: {
-	winner: NonNullable<
-		| SerializeFrom<typeof loader>["events"][number]["tournamentWinners"]
-		| SerializeFrom<typeof loader>["events"][number]["eventWinners"]
-	>;
+	tournamentWinners: SerializeFrom<
+		typeof loader
+	>["events"][number]["tournamentWinners"];
+	eventWinners: SerializeFrom<typeof loader>["events"][number]["eventWinners"];
 }) {
+	const winners =
+		tournamentWinners.length > 0 ? tournamentWinners : eventWinners;
+
+	if (winners.length === 0) return null;
+
 	return (
-		<div className="stack xs">
-			<div className="stack horizontal sm items-center font-semi-bold">
-				<Placement placement={1} size={24} />
-				{winner.avatarUrl ? (
-					<img
-						src={userSubmittedImage(winner.avatarUrl)}
-						alt=""
-						width={24}
-						height={24}
-						className="rounded-full"
-					/>
-				) : null}
-				{winner.name}
-			</div>
-			<div className="stack xs horizontal">
-				{winner.members.map((member) => (
-					<Avatar key={member.discordId} user={member} size="xxs" />
-				))}
-			</div>
+		<div className="stack md">
+			{winners.map((winner) => (
+				<div key={winner.id} className="stack xs">
+					<div className="stack horizontal sm items-center font-semi-bold">
+						<Placement placement={1} size={24} />
+						{winner.avatarUrl ? (
+							<img
+								src={winner.avatarUrl}
+								alt=""
+								width={24}
+								height={24}
+								className="rounded-full"
+							/>
+						) : null}
+						{winner.name}
+					</div>
+					<div className="stack xs horizontal">
+						{winner.members.map((member) => (
+							<Avatar key={member.discordId} user={member} size="xxs" />
+						))}
+					</div>
+				</div>
+			))}
 		</div>
 	);
 }
@@ -536,7 +624,7 @@ function EventLeaderboard({
 		<div className="stack md">
 			{ownEntry ? (
 				<>
-					<ol className="org__leaderboard-list" start={ownEntry.placement}>
+					<ol className={styles.leaderboardList} start={ownEntry.placement}>
 						<li>
 							<EventLeaderboardRow entry={ownEntry.entry} />
 						</li>
@@ -544,7 +632,7 @@ function EventLeaderboard({
 					<Divider />
 				</>
 			) : null}
-			<ol className="org__leaderboard-list">
+			<ol className={styles.leaderboardList}>
 				{leaderboard.map((entry) => (
 					<li key={entry.user.discordId}>
 						<EventLeaderboardRow entry={entry} />
@@ -563,7 +651,7 @@ function EventLeaderboardRow({
 	>[number];
 }) {
 	return (
-		<div className="org__leaderboard-list__row">
+		<div className={styles.leaderboardListRow}>
 			<Link
 				to={userPage(entry.user)}
 				className="stack horizontal sm items-center font-semi-bold text-main-forced"

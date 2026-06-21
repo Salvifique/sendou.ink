@@ -1,20 +1,32 @@
-import { Link, useFetcher } from "@remix-run/react";
 import clsx from "clsx";
-import * as React from "react";
+import { Eye } from "lucide-react";
+import type * as React from "react";
+import { Link } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { SendouButton } from "~/components/elements/Button";
 import { SendouPopover } from "~/components/elements/Popover";
 import { useUser } from "~/features/auth/core/user";
 import { TournamentStream } from "~/features/tournament/components/TournamentStream";
-import type { TournamentStreamsLoader } from "~/features/tournament/loaders/to.$id.streams.server";
 import {
-	useStreamingParticipants,
 	useTournament,
+	useTournamentVods,
 } from "~/features/tournament/routes/to.$id";
+import { matchEndedEarly } from "~/features/tournament-match/tournament-match-utils";
+import { useAutoRerender } from "~/hooks/useAutoRerender";
+import { databaseTimestampToDate } from "~/utils/dates";
 import type { Unpacked } from "~/utils/types";
-import { tournamentMatchPage, tournamentStreamsPage } from "~/utils/urls";
+import {
+	tournamentMatchPage,
+	tournamentStreamsPage,
+	vodUrl,
+} from "~/utils/urls";
 import type { Bracket } from "../../core/Bracket";
+import * as Deadline from "../../core/Deadline";
 import type { TournamentData } from "../../core/Tournament.server";
+import parentStyles from "../../tournament-bracket.module.css";
+import styles from "./bracket.module.css";
+
+type LineType = "none" | "straight" | "curve-up" | "curve-down";
 
 interface MatchProps {
 	match: Unpacked<TournamentData["data"]["match"]>;
@@ -24,30 +36,49 @@ interface MatchProps {
 	roundNumber: number;
 	showSimulation: boolean;
 	bracket: Bracket;
+	hideMatchTimer?: boolean;
+	lineType?: LineType;
+	lineVerticalExtend?: number;
+	spoilerCensor?: "full" | "score-only";
 }
 
 export function Match(props: MatchProps) {
 	const isBye = !props.match.opponent1 || !props.match.opponent2;
 
 	if (isBye) {
-		return <div className="bracket__match__bye" />;
+		return (
+			<div className={clsx(styles.matchBye, styles.matchWrapper)}>
+				<MatchLine
+					lineType={props.lineType}
+					verticalExtend={props.lineVerticalExtend}
+				/>
+			</div>
+		);
 	}
 
 	return (
-		<div className="relative">
+		<div className={styles.matchWrapper}>
 			<MatchHeader {...props} />
-			<MatchWrapper {...props}>
+			<MatchContent {...props}>
 				<MatchRow {...props} side={1} />
-				<div className="bracket__match__separator" />
+				<div className={styles.matchSeparator} />
 				<MatchRow {...props} side={2} />
-			</MatchWrapper>
+			</MatchContent>
+			{!props.hideMatchTimer ? (
+				<MatchTimer match={props.match} bracket={props.bracket} />
+			) : null}
+			<MatchLine
+				lineType={props.lineType}
+				verticalExtend={props.lineVerticalExtend}
+			/>
 		</div>
 	);
 }
 
 function MatchHeader({ match, type, roundNumber, group }: MatchProps) {
 	const tournament = useTournament();
-	const streamingParticipants = useStreamingParticipants();
+	const vods = useTournamentVods();
+	const streamingParticipants = tournament.streamingParticipantIds ?? [];
 
 	const prefix = () => {
 		if (type === "winners") return "WB ";
@@ -59,6 +90,7 @@ function MatchHeader({ match, type, roundNumber, group }: MatchProps) {
 
 	const isOver =
 		match.opponent1?.result === "win" || match.opponent2?.result === "win";
+	const matchVods = isOver ? vods.filter((v) => v.matchId === match.id) : [];
 	const hasStreams = () => {
 		if (isOver || !match.opponent1?.id || !match.opponent2?.id) return false;
 		if (
@@ -78,42 +110,71 @@ function MatchHeader({ match, type, roundNumber, group }: MatchProps) {
 	};
 	const toBeCasted =
 		!isOver &&
-		tournament.ctx.castedMatchesInfo?.lockedMatches?.includes(match.id);
+		tournament.ctx.castedMatchesInfo?.lockedMatches?.some(
+			(lm) => lm.matchId === match.id,
+		);
 
 	return (
-		<div className="bracket__match__header">
-			<div className="bracket__match__header__box">
+		<div className={styles.matchHeader}>
+			<div className={styles.matchHeaderBox}>
 				{prefix()}
 				{roundNumber}.{match.number}
 			</div>
 			{toBeCasted ? (
 				<SendouPopover
 					trigger={
-						<SendouButton className="bracket__match__header__box bracket__match__header__box__button">
+						<SendouButton
+							className={clsx(
+								styles.matchHeaderBox,
+								styles.matchHeaderBoxButton,
+							)}
+						>
 							🔒 CAST
 						</SendouButton>
 					}
 				>
 					Match is scheduled to be casted
 				</SendouPopover>
-			) : hasStreams() ? (
+			) : hasStreams() && match.startedAt ? (
 				<SendouPopover
 					placement="top"
 					popoverClassName="w-max"
 					trigger={
-						<SendouButton className="bracket__match__header__box bracket__match__header__box__button">
+						<SendouButton
+							className={clsx(
+								styles.matchHeaderBox,
+								styles.matchHeaderBoxButton,
+							)}
+						>
 							🔴 LIVE
 						</SendouButton>
 					}
 				>
 					<MatchStreams match={match} />
 				</SendouPopover>
+			) : matchVods.length > 0 ? (
+				<SendouPopover
+					placement="top"
+					popoverClassName="w-max"
+					trigger={
+						<SendouButton
+							className={clsx(
+								styles.matchHeaderBox,
+								styles.matchHeaderBoxButton,
+							)}
+						>
+							📺 VOD
+						</SendouButton>
+					}
+				>
+					<MatchVods vods={matchVods} />
+				</SendouPopover>
 			) : null}
 		</div>
 	);
 }
 
-function MatchWrapper({
+function MatchContent({
 	match,
 	isPreview,
 	children,
@@ -123,7 +184,7 @@ function MatchWrapper({
 	if (!isPreview) {
 		return (
 			<Link
-				className="bracket__match"
+				className={styles.match}
 				to={tournamentMatchPage({
 					tournamentId: tournament.ctx.id,
 					matchId: match.id,
@@ -135,7 +196,7 @@ function MatchWrapper({
 		);
 	}
 
-	return <div className="bracket__match">{children}</div>;
+	return <div className={styles.match}>{children}</div>;
 }
 
 function MatchRow({
@@ -144,6 +205,7 @@ function MatchRow({
 	isPreview,
 	showSimulation,
 	bracket,
+	spoilerCensor,
 }: MatchProps & { side: 1 | 2 }) {
 	const user = useUser();
 	const tournament = useTournament();
@@ -152,12 +214,31 @@ function MatchRow({
 	const opponent = match[`opponent${side}`];
 
 	const score = () => {
+		if (spoilerCensor) return null;
 		if (!match.opponent1?.id || !match.opponent2?.id || isPreview) return null;
 
-		return opponent!.score ?? 0;
+		const opponentScore = opponent!.score;
+		const opponentResult = opponent!.result;
+
+		// Display W/L as the score might not reflect the winner set in the early ending
+		const round = bracket.data.round.find((r) => r.id === match.round_id);
+		if (
+			round?.maps &&
+			matchEndedEarly({
+				opponentOne: match.opponent1,
+				opponentTwo: match.opponent2,
+				count: round.maps.count,
+				countType: round.maps.type,
+			})
+		) {
+			if (opponentResult === "win") return "W";
+			if (opponentResult === "loss") return "L";
+		}
+
+		return opponentScore ?? 0;
 	};
 
-	const isLoser = opponent?.result === "loss";
+	const isLoser = spoilerCensor ? false : opponent?.result === "loss";
 
 	const { team, simulated } = (() => {
 		if (opponent?.id) {
@@ -176,61 +257,68 @@ function MatchRow({
 
 	const ownTeam = tournament.teamMemberOfByUser(user);
 
-	const logoSrc =
-		!simulated && team ? tournament.tournamentTeamLogoSrc(team) : null;
+	const logoSrc = team ? tournament.tournamentTeamLogoSrc(team) : null;
+	const showAvatar = spoilerCensor === "full" ? false : !simulated && team;
 
-	const isBigSeedNumber = team?.seed && team.seed > 99;
+	const isBigSeedNumber =
+		spoilerCensor === "full" ? false : team?.seed && team.seed > 99;
+
+	const displayedSeed = spoilerCensor === "full" ? null : team?.seed;
+	const displayedName =
+		spoilerCensor === "full" ? "???" : (team?.name ?? "???");
 
 	return (
 		<div
 			className={clsx("stack horizontal", { "text-lighter": isLoser })}
 			data-participant-id={team?.id}
-			title={team?.members.map((m) => m.username).join(", ")}
+			title={
+				spoilerCensor === "full"
+					? undefined
+					: team?.members.map((m) => m.username).join(", ")
+			}
 		>
 			<div
-				className={clsx("bracket__match__seed", {
-					"text-lighter-important italic opaque": simulated,
-					bracket__match__seed__wide: isBigSeedNumber,
+				className={clsx(styles.matchSeed, {
+					"text-lighter italic opaque": simulated,
+					[styles.matchSeedWide]: isBigSeedNumber,
 				})}
 			>
-				{team?.seed}
+				{displayedSeed}
 			</div>
-			{logoSrc ? <Avatar size="xxxs" url={logoSrc} className="mr-1" /> : null}
+			{showAvatar ? (
+				<Avatar
+					size="xxxs"
+					url={logoSrc}
+					identiconInput={team!.name}
+					className="mr-1"
+				/>
+			) : null}
 			<div
-				className={clsx("bracket__match__team-name", {
+				className={clsx(styles.matchTeamName, {
 					"text-theme-secondary":
 						!simulated && ownTeam && ownTeam?.id === team?.id,
 					"text-lighter italic opaque": simulated,
-					"bracket__match__team-name__narrow":
+					[styles.matchTeamNameNarrow]:
 						// either but not both
-						(logoSrc || isBigSeedNumber) && !(logoSrc && isBigSeedNumber),
+						(showAvatar || isBigSeedNumber) && !(showAvatar && isBigSeedNumber),
 					// both
-					"bracket__match__team-name__narrowest": logoSrc && isBigSeedNumber,
+					[styles.matchTeamNameNarrowest]: showAvatar && isBigSeedNumber,
 					invisible: !team,
 				})}
 			>
-				{team?.name ?? "???"}
+				{displayedName}
 			</div>{" "}
-			<div className="bracket__match__score">{score()}</div>
+			<div className={styles.matchScore}>{score()}</div>
 		</div>
 	);
 }
 
 function MatchStreams({ match }: Pick<MatchProps, "match">) {
 	const tournament = useTournament();
-	const fetcher = useFetcher<TournamentStreamsLoader>();
 
-	React.useEffect(() => {
-		if (fetcher.state !== "idle" || fetcher.data) return;
-		fetcher.load(`/to/${tournament.ctx.id}/streams`);
-	}, [fetcher, tournament.ctx.id]);
-
-	if (!fetcher.data || !match.opponent1?.id || !match.opponent2?.id)
-		return (
-			<div className="text-lighter text-center tournament-bracket__stream-popover">
-				Loading streams...
-			</div>
-		);
+	if (!match.opponent1?.id || !match.opponent2?.id) {
+		return null;
+	}
 
 	const castingAccount = tournament.ctx.castedMatchesInfo?.castedMatches.find(
 		(cm) => cm.matchId === match.id,
@@ -240,23 +328,27 @@ function MatchStreams({ match }: Pick<MatchProps, "match">) {
 		(teamId) => tournament.teamById(teamId)?.members.map((m) => m.userId) ?? [],
 	);
 
-	const streamsOfThisMatch = fetcher.data.streams.filter(
+	const streamsOfThisMatch = tournament.streams.filter(
 		(stream) =>
 			(stream.userId && matchParticipants.includes(stream.userId)) ||
 			stream.twitchUserName === castingAccount,
 	);
 
-	if (streamsOfThisMatch.length === 0)
+	if (streamsOfThisMatch.length === 0) {
 		return (
-			<div className="tournament-bracket__stream-popover">
+			<div className={parentStyles.streamPopover}>
 				After all there seems to be no streams of this match. Check the{" "}
 				<Link to={tournamentStreamsPage(tournament.ctx.id)}>streams page</Link>{" "}
 				for all the available streams.
 			</div>
 		);
+	}
 
 	return (
-		<div className="stack md justify-center tournament-bracket__stream-popover">
+		<div
+			className={clsx("stack md justify-center", parentStyles.streamPopover)}
+			data-testid="stream-popover"
+		>
 			{streamsOfThisMatch.map((stream) => (
 				<TournamentStream
 					key={stream.twitchUserName}
@@ -264,6 +356,168 @@ function MatchStreams({ match }: Pick<MatchProps, "match">) {
 					withThumbnail={false}
 				/>
 			))}
+		</div>
+	);
+}
+
+interface MatchVodsProps {
+	vods: Array<{
+		matchId: number;
+		userId: number | null;
+		platform: string;
+		account: string;
+		platformVideoId: string;
+		timestampSeconds: number;
+		viewCount: number;
+	}>;
+}
+
+function MatchVods({ vods }: MatchVodsProps) {
+	const tournament = useTournament();
+
+	return (
+		<div className={parentStyles.vodGrid}>
+			{vods.map((vod) => {
+				const team = vod.userId
+					? tournament.ctx.teams.find((t) =>
+							t.members.some((m) => m.userId === vod.userId),
+						)
+					: null;
+				const user = team?.members.find((m) => m.userId === vod.userId);
+
+				return (
+					<a
+						key={`${vod.platformVideoId}-${vod.account}`}
+						href={vodUrl(vod)}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						<span className={parentStyles.vodUser}>
+							{user ? (
+								<>
+									<Avatar size="xxs" user={user} />
+									<span className="font-semi-bold">{user.username}</span>
+								</>
+							) : (
+								<span className="font-semi-bold">{vod.account}</span>
+							)}
+						</span>
+						<span
+							className={clsx("text-theme-secondary", parentStyles.vodTeamName)}
+						>
+							{user ? team?.name : null}
+						</span>
+						<span className="text-lighter stack horizontal xs items-center">
+							<Eye size={12} />
+							{vod.viewCount.toLocaleString()}
+						</span>
+					</a>
+				);
+			})}
+		</div>
+	);
+}
+
+function MatchTimer({ match, bracket }: Pick<MatchProps, "match" | "bracket">) {
+	const tournament = useTournament();
+
+	if (tournament.isLeagueDivision) return null;
+	if (!match.startedAt) return null;
+
+	const isOver =
+		match.opponent1?.result === "win" || match.opponent2?.result === "win";
+	if (isOver) return null;
+
+	const isLocked = tournament.ctx.castedMatchesInfo?.lockedMatches?.some(
+		(lm) => lm.matchId === match.id,
+	);
+	if (isLocked) return null;
+
+	const round = bracket.data.round.find((r) => r.id === match.round_id);
+	const bestOf = round?.maps?.count;
+	if (!bestOf) return null;
+
+	return (
+		<MatchTimerInner
+			startedAt={match.startedAt}
+			gamesCompleted={
+				(match.opponent1?.score ?? 0) + (match.opponent2?.score ?? 0)
+			}
+			bestOf={bestOf}
+		/>
+	);
+}
+
+interface MatchTimerInnerProps {
+	startedAt: number;
+	gamesCompleted: number;
+	bestOf: number;
+}
+
+function MatchTimerInner({
+	startedAt,
+	gamesCompleted,
+	bestOf,
+}: MatchTimerInnerProps) {
+	const startedAtDate = databaseTimestampToDate(startedAt);
+	const now = useAutoRerender("minute", { alignTo: startedAtDate });
+
+	const elapsedMinutes = Math.floor(
+		(now.getTime() - startedAtDate.getTime()) / 60_000,
+	);
+	const status = Deadline.matchStatus({
+		elapsedMinutes,
+		gamesCompleted,
+		maxGamesCount: bestOf,
+	});
+
+	const displayText = elapsedMinutes >= 60 ? "1h+" : `${elapsedMinutes}m`;
+
+	const statusColor =
+		status === "error"
+			? "var(--color-error)"
+			: status === "warning"
+				? "var(--color-warning)"
+				: "var(--color-text)";
+
+	return (
+		<div className={styles.matchTimer} data-testid="bracket-match-timer">
+			<div className={styles.matchHeaderBox} style={{ color: statusColor }}>
+				{displayText}
+			</div>
+		</div>
+	);
+}
+
+interface MatchLineProps {
+	lineType?: LineType;
+	verticalExtend?: number;
+}
+
+function MatchLine({ lineType, verticalExtend }: MatchLineProps) {
+	if (!lineType || lineType === "none") return null;
+
+	const lineClass =
+		lineType === "straight"
+			? styles.matchLineStraight
+			: lineType === "curve-up"
+				? styles.matchLineCurveUp
+				: styles.matchLineCurveDown;
+
+	const style = verticalExtend
+		? ({
+				"--bracket-vertical-extend": `${verticalExtend}px`,
+			} as React.CSSProperties)
+		: undefined;
+
+	return (
+		<div className={clsx(styles.matchLineContainer, lineClass)} style={style}>
+			{lineType === "curve-down" ? (
+				<div className={styles.matchLineConnectorDown} style={style} />
+			) : null}
+			{lineType === "curve-up" ? (
+				<div className={styles.matchLineConnectorUp} style={style} />
+			) : null}
 		</div>
 	);
 }

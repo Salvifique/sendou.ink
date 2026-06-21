@@ -1,29 +1,27 @@
+export const HIGHLIGHT_CHECKBOX_NAME = "highlightTeamIds";
+export const HIGHLIGHT_TOURNAMENT_CHECKBOX_NAME = "highlightTournamentTeamIds";
+
 export const USER = {
-	BIO_MAX_LENGTH: 2000,
+	BIO_MAX_LENGTH: 3000,
+	BIO_MD_MAX_LENGTH: 8000,
 	CUSTOM_URL_MAX_LENGTH: 32,
 	CUSTOM_NAME_MAX_LENGTH: 32,
 	BATTLEFY_MAX_LENGTH: 32,
-	IN_GAME_NAME_TEXT_MAX_LENGTH: 20,
-	IN_GAME_NAME_DISCRIMINATOR_MAX_LENGTH: 5,
 	WEAPON_POOL_MAX_SIZE: 5,
 	COMMISSION_TEXT_MAX_LENGTH: 1000,
 	MOD_NOTE_MAX_LENGTH: 2000,
+	MAX_MAIN_WIDGETS: 5,
+	MAX_SIDE_WIDGETS: 7,
+	GAME_BADGES_MAX: 8,
+	GAME_BADGES_SMALL_MAX: 4,
 };
 
-export const MATCHES_PER_SEASONS_PAGE = 8;
-export const DEFAULT_BUILD_SORT = ["WEAPON_POOL", "UPDATED_AT"] as const;
+export const SPL2_JOIN_ORDER_CUTOFF = 13_589;
 
-export const CUSTOM_CSS_VAR_COLORS = [
-	"bg",
-	"bg-darker",
-	"bg-lighter",
-	"bg-lightest",
-	"text",
-	"text-lighter",
-	"theme",
-	"theme-secondary",
-	"chat",
-] as const;
+export const MATCHES_PER_SEASONS_PAGE = 8;
+export const RESULTS_PER_PAGE = 25;
+export const HIGHLIGHTS_RESULTS_MAX = 500;
+export const DEFAULT_BUILD_SORT = ["WEAPON_POOL", "UPDATED_AT"] as const;
 
 /**
  * An array of ISO 3166-1 alpha-2 country codes.
@@ -102,6 +100,7 @@ export const COUNTRY_CODES = [
 	"ER",
 	"ES",
 	"ET",
+	"EU",
 	"FI",
 	"FJ",
 	"FK",
@@ -110,6 +109,10 @@ export const COUNTRY_CODES = [
 	"FR",
 	"GA",
 	"GB",
+	"GB-ENG",
+	"GB-NIR",
+	"GB-SCT",
+	"GB-WLS",
 	"GD",
 	"GE",
 	"GF",

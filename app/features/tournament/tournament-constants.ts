@@ -1,5 +1,8 @@
+import { Config } from "~/config";
+import { TEAM } from "../team/team-constants";
+
 export const TOURNAMENT = {
-	TEAM_NAME_MAX_LENGTH: 32,
+	TEAM_NAME_MAX_LENGTH: TEAM.NAME_MAX_LENGTH,
 	COUNTERPICK_MAPS_PER_MODE: 2,
 	COUNTERPICK_MAX_STAGE_REPEAT: 2,
 	COUNTERPICK_ONE_MODE_TOURNAMENT_MAPS_PER_MODE: 6,
@@ -9,11 +12,17 @@ export const TOURNAMENT = {
 	MAX_GROUP_SIZE: 6,
 	MAX_BRACKETS_PER_TOURNAMENT: 10,
 	BRACKET_NAME_MAX_LENGTH: 32,
+	PLACEMENT_MAX: 100,
 	// just a fallback, normally this should be set by user explicitly
 	RR_DEFAULT_TEAM_COUNT_PER_GROUP: 4,
+	RR_TEAMS_PER_GROUP_OPTIONS: [3, 4, 5, 6],
+	RR_AB_DIVISIONS_TEAMS_PER_GROUP_OPTIONS: [4, 6, 8, 10, 12],
 	SWISS_DEFAULT_GROUP_COUNT: 1,
 	SWISS_DEFAULT_ROUND_COUNT: 5,
 	SE_DEFAULT_HAS_THIRD_PLACE_MATCH: true,
+	MAX_SAVED_COUNT: 20,
+	/** How many days after a tournament ends VOD links are shown on the bracket */
+	VOD_VISIBILITY_DAYS: 7,
 	ROUND_NAMES: {
 		WB_FINALS: "WB Finals",
 		GRAND_FINALS: "Grand Finals",
@@ -27,8 +36,7 @@ export const TOURNAMENT = {
 } as const;
 
 export const LEAGUES =
-	process.env.NODE_ENV === "development" &&
-	import.meta.env.VITE_PROD_MODE !== "true"
+	process.env.NODE_ENV === "development" && !Config.prodMode
 		? {
 				LUTI: [
 					{
@@ -74,6 +82,31 @@ export const LEAGUES =
 							{
 								weekNumber: 14,
 								year: 2025,
+							},
+						],
+					},
+					{
+						tournamentId: 3192,
+						weeks: [
+							{
+								weekNumber: 9,
+								year: 2026,
+							},
+							{
+								weekNumber: 10,
+								year: 2026,
+							},
+							{
+								weekNumber: 11,
+								year: 2026,
+							},
+							{
+								weekNumber: 12,
+								year: 2026,
+							},
+							{
+								weekNumber: 13,
+								year: 2026,
 							},
 						],
 					},

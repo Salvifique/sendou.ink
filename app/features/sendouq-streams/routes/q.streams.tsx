@@ -1,12 +1,12 @@
-import type { MetaFunction } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { User } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { TierImage, WeaponImage } from "~/components/Image";
-import { UserIcon } from "~/components/icons/User";
 import { Main } from "~/components/Main";
 import { useAutoRerender } from "~/hooks/useAutoRerender";
-import { useIsMounted } from "~/hooks/useIsMounted";
+import { useHydrated } from "~/hooks/useHydrated";
 import { twitchThumbnailUrlToSrc } from "~/modules/twitch/utils";
 import { databaseTimestampToDate } from "~/utils/dates";
 import { metaTags } from "~/utils/remix";
@@ -14,9 +14,10 @@ import type { SendouRouteHandle } from "~/utils/remix.server";
 import { FAQ_PAGE, sendouQMatchPage, twitchUrl, userPage } from "~/utils/urls";
 
 import { loader } from "../loaders/q.streams.server";
+
 export { loader };
 
-import "~/features/sendouq/q.css";
+import styles from "./q.streams.module.css";
 
 export const handle: SendouRouteHandle = {
 	i18n: ["q"],
@@ -59,14 +60,14 @@ export default function SendouQStreamsPage() {
 							<div className="stack horizontal justify-between items-end">
 								<Link
 									to={userPage(streamedMatch.user)}
-									className="q-stream__stream__user-container"
+									className={styles.userContainer}
 								>
 									<Avatar size="xxs" user={streamedMatch.user} />{" "}
 									{streamedMatch.user.username}
 								</Link>
 								<div className="stack horizontal sm">
 									{streamedMatch.weaponSplId ? (
-										<div className="q-stream__info-circle">
+										<div className={styles.infoCircle}>
 											<WeaponImage
 												weaponSplId={streamedMatch.weaponSplId}
 												size={24}
@@ -75,7 +76,7 @@ export default function SendouQStreamsPage() {
 										</div>
 									) : null}
 									{streamedMatch.tier ? (
-										<div className="q-stream__info-circle">
+										<div className={styles.infoCircle}>
 											<TierImage tier={streamedMatch.tier} width={24} />
 										</div>
 									) : null}
@@ -108,8 +109,8 @@ export default function SendouQStreamsPage() {
 										)}
 									/>
 								</div>
-								<div className="q-stream__stream__viewer-count">
-									<UserIcon />
+								<div className={styles.viewerCount}>
+									<User />
 									{streamedMatch.stream.viewerCount}
 								</div>
 							</div>
@@ -124,12 +125,14 @@ export default function SendouQStreamsPage() {
 
 function RelativeStartTime({ startedAt }: { startedAt: Date }) {
 	const { i18n } = useTranslation();
-	const isMounted = useIsMounted();
-	useAutoRerender();
+	const isHydrated = useHydrated();
+	const now = useAutoRerender();
 
-	if (!isMounted) return null;
+	if (!isHydrated) return null;
 
-	const minutesAgo = Math.floor((startedAt.getTime() - Date.now()) / 1000 / 60);
+	const minutesAgo = Math.floor(
+		(startedAt.getTime() - now.getTime()) / 1000 / 60,
+	);
 	const formatter = new Intl.RelativeTimeFormat(i18n.language, {
 		style: "short",
 	});

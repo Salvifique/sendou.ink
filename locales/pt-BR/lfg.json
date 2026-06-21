@@ -8,7 +8,7 @@
 	"post.lastActive": "última atividade",
 	"noPosts": "Não há postagens combinando com o filtro.",
 	"expiring": "O prazo de validade da sua postagem está acabando. Você ainda está procurando?",
-	"addFilter": "Adicionar filtro",
+	"addFilter": "",
 	"filters.Weapon": "Pool de armas",
 	"filters.Type": "Tipo de postagem",
 	"filters.Timezone": "Diferença de horas pelo fuso horário",
@@ -28,5 +28,6 @@
 	"new.weaponPool.header": "Pool de armas",
 	"new.weaponPool.userProfile": "perfil de usuário",
 	"new.languages.header": "Línguas",
+	"new.languages.placeholder": "Escolha todos que se aplicam",
 	"new.languages.sqSettingsPage": "página de configurações do SendouQ"
 }

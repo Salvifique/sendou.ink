@@ -1,30 +1,22 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { jsonArrayFrom, jsonObjectFrom } from "kysely/helpers/sqlite";
-import { cors } from "remix-utils/cors";
-import { z } from "zod/v4";
+import type { LoaderFunctionArgs } from "react-router";
+import { z } from "zod";
 import { db } from "~/db/sql";
 import { ordinalToSp } from "~/features/mmr/mmr-utils";
 import * as TournamentRepository from "~/features/tournament/TournamentRepository.server";
-import i18next from "~/modules/i18n/i18next.server";
+import { i18next } from "~/modules/i18n/i18next.server";
 import { nullifyingAvg } from "~/utils/arrays";
 import { databaseTimestampToDate } from "~/utils/dates";
+import { concatUserSubmittedImagePrefix } from "~/utils/kysely.server";
 import { parseParams } from "~/utils/remix.server";
-import { userSubmittedImage } from "~/utils/urls";
 import { id } from "~/utils/zod";
-import {
-	handleOptionsRequest,
-	requireBearerAuth,
-} from "../api-public-utils.server";
 import type { GetTournamentTeamsResponse } from "../schema";
 
 const paramsSchema = z.object({
 	id,
 });
 
-export const loader = async ({ params, request }: LoaderFunctionArgs) => {
-	await handleOptionsRequest(request);
-	requireBearerAuth(request);
-
+export const loader = async ({ params }: LoaderFunctionArgs) => {
 	const t = await i18next.getFixedT("en", ["game-misc"]);
 	const { id } = parseParams({
 		params,
@@ -49,7 +41,9 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 			"TournamentTeam.seed",
 			"TournamentTeam.createdAt",
 			"TournamentTeamCheckIn.checkedInAt",
-			"UserSubmittedImage.url as avatarUrl",
+			concatUserSubmittedImagePrefix(eb.ref("UserSubmittedImage.url")).as(
+				"avatarUrl",
+			),
 			jsonObjectFrom(
 				eb
 					.selectFrom("AllTeam")
@@ -61,7 +55,9 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 					.whereRef("AllTeam.id", "=", "TournamentTeam.teamId")
 					.select([
 						"AllTeam.customUrl",
-						"UserSubmittedImage.url as logoUrl",
+						concatUserSubmittedImagePrefix(eb.ref("UserSubmittedImage.url")).as(
+							"logoUrl",
+						),
 						"AllTeam.deletedAt",
 					]),
 			).as("team"),
@@ -85,8 +81,10 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 						"User.discordId",
 						"User.discordAvatar",
 						"User.battlefy",
+						"User.country",
+						"User.pronouns",
 						"TournamentTeamMember.inGameName",
-						"TournamentTeamMember.isOwner",
+						"TournamentTeamMember.role",
 						"TournamentTeamMember.createdAt",
 						"RankedSeedingSkill.ordinal as rankedOrdinal",
 						"UnrankedSeedingSkill.ordinal as unrankedOrdinal",
@@ -106,17 +104,11 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 			).as("mapPool"),
 		])
 		.where("TournamentTeam.tournamentId", "=", id)
+		.where("TournamentTeam.isPlaceholder", "=", 0)
 		.orderBy("TournamentTeam.createdAt", "asc")
 		.execute();
 
 	const friendCodes = await TournamentRepository.friendCodesByTournamentId(id);
-
-	const logoUrl = (team: (typeof teams)[number]) => {
-		const url = team.team?.logoUrl ?? team.avatarUrl;
-		if (!url) return null;
-
-		return userSubmittedImage(url);
-	};
 
 	const result: GetTournamentTeamsResponse = teams.map((team) => {
 		return {
@@ -147,13 +139,15 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 					avatarUrl: member.discordAvatar
 						? `https://cdn.discordapp.com/avatars/${member.discordId}/${member.discordAvatar}.png`
 						: null,
-					captain: Boolean(member.isOwner),
+					country: member.country,
+					captain: member.role === "OWNER",
 					inGameName: member.inGameName,
+					pronouns: member.pronouns,
 					friendCode: friendCodes[member.userId],
 					joinedAt: databaseTimestampToDate(member.createdAt).toISOString(),
 				};
 			}),
-			logoUrl: logoUrl(team),
+			logoUrl: team.team?.logoUrl ?? team.avatarUrl,
 			mapPool:
 				team.mapPool.length > 0
 					? team.mapPool.map((map) => {
@@ -169,7 +163,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 		};
 	});
 
-	return await cors(request, json(result));
+	return Response.json(result);
 };
 
 function toSeedingPowerSP(ordinals: (number | null)[]) {

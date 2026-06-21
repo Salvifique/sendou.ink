@@ -27,7 +27,6 @@ import { cutToNDecimalPlaces, roundToNDecimalPlaces } from "~/utils/number";
 import { assertUnreachable } from "~/utils/types";
 import {
 	DAMAGE_TYPE,
-	multiShot,
 	RAINMAKER_SPEED_PENALTY_MODIFIER,
 } from "../analyzer-constants";
 import type {
@@ -41,13 +40,15 @@ import type {
 	SubWeaponParams,
 } from "../analyzer-types";
 import { INK_CONSUME_TYPES } from "../analyzer-types";
-import type { abilityValues as abilityValuesJson } from "./ability-values";
+import type { abilityValues as abilityValuesJson } from "../data/ability-values";
 import {
 	abilityPointsToEffects,
 	abilityValues,
 	apFromMap,
+	mainWeaponParams as getMainWeaponParams,
 	hasEffect,
 	hpDivided,
+	weaponIdToMultiShotCount,
 	weaponParams,
 } from "./utils";
 
@@ -62,8 +63,7 @@ export function buildStats({
 	mainOnlyAbilities?: Array<Ability>;
 	hasTacticooler: boolean;
 }): AnalyzedBuild {
-	const mainWeaponParams = weaponParams().mainWeapons[weaponSplId];
-	invariant(mainWeaponParams, `Weapon with splId ${weaponSplId} not found`);
+	const mainWeaponParams = getMainWeaponParams(weaponSplId);
 
 	const subWeaponParams =
 		weaponParams().subWeapons[mainWeaponParams.subWeaponId];
@@ -72,8 +72,9 @@ export function buildStats({
 		`Sub weapon with splId ${mainWeaponParams.subWeaponId} not found`,
 	);
 
-	const specialWeaponParams =
-		weaponParams().specialWeapons[mainWeaponParams.specialWeaponId];
+	const specialWeaponParams = weaponParams().specialWeapons[
+		mainWeaponParams.specialWeaponId
+	] as SpecialWeaponParams;
 	invariant(
 		specialWeaponParams,
 		`Special weapon with splId ${mainWeaponParams.specialWeaponId} not found`,
@@ -102,7 +103,7 @@ export function buildStats({
 				? framesToSeconds(mainWeaponParams.KeepChargeFullFrame)
 				: undefined,
 			speedType: mainWeaponParams.WeaponSpeedType ?? "Normal",
-			multiShots: multiShot[weaponSplId],
+			multiShots: weaponIdToMultiShotCount(weaponSplId),
 		},
 		stats: {
 			specialPoint: specialPoint(input),
@@ -441,10 +442,14 @@ const damageTypeToParamsKey: Record<
 	SPECIAL_THROW_DIRECT: "ThrowDirectDamage",
 	SPECIAL_BULLET_MAX: "BulletDamageMax",
 	SPECIAL_BULLET_MIN: "BulletDamageMin",
+	SPECIAL_SPLASH_MAX: "SplashDamageMax",
+	SPECIAL_SPLASH_MIN: "SplashDamageMin",
 	SPECIAL_CANNON: "CannonDamage",
 	SPECIAL_BUMP: "BumpDamage",
 	SPECIAL_JUMP: "JumpDamage",
 	SPECIAL_TICK: "TickDamage",
+	// Virtual damage type for comp-analyzer, calculated from other damages
+	COMBO: [],
 };
 
 function damages(args: StatFunctionInput): AnalyzedBuild["stats"]["damages"] {
@@ -461,7 +466,7 @@ function damages(args: StatFunctionInput): AnalyzedBuild["stats"]["damages"] {
 						value: subValue.Damage / 10,
 						distance: subValue.Distance,
 						id: nanoid(),
-						multiShots: multiShot[args.weaponSplId],
+						multiShots: weaponIdToMultiShotCount(args.weaponSplId),
 					});
 				}
 
@@ -477,9 +482,9 @@ function damages(args: StatFunctionInput): AnalyzedBuild["stats"]["damages"] {
 				shotsToSplat: shotsToSplat({
 					value,
 					type,
-					multiShots: multiShot[args.weaponSplId],
+					multiShots: weaponIdToMultiShotCount(args.weaponSplId),
 				}),
-				multiShots: multiShot[args.weaponSplId],
+				multiShots: weaponIdToMultiShotCount(args.weaponSplId),
 			});
 		}
 	}
@@ -503,7 +508,7 @@ function specialWeaponDamages(
 						value: subValue.Damage / 10,
 						distance: subValue.Distance,
 						id: nanoid(),
-						multiShots: multiShot[args.weaponSplId],
+						multiShots: weaponIdToMultiShotCount(args.weaponSplId),
 					});
 				}
 
@@ -519,9 +524,9 @@ function specialWeaponDamages(
 				shotsToSplat: shotsToSplat({
 					value,
 					type,
-					multiShots: multiShot[args.weaponSplId],
+					multiShots: weaponIdToMultiShotCount(args.weaponSplId),
 				}),
-				multiShots: multiShot[args.weaponSplId],
+				multiShots: weaponIdToMultiShotCount(args.weaponSplId),
 			});
 		}
 	}
@@ -545,7 +550,7 @@ function specialWeaponDamages(
 			id: nanoid(),
 			distance: 0,
 			value: R.sum(cannonDamages.map((v) => v.value)),
-			type: "SPECIAL_CANNON",
+			type: "COMBO",
 		});
 	}
 
@@ -617,7 +622,7 @@ function subWeaponDefenseDamages(
 								R.sum(arrayValues.map((v) => v.value)),
 								1,
 							),
-							type,
+							type: "BOMB_DIRECT",
 						});
 					}
 
@@ -726,7 +731,7 @@ function subWeaponIdToEffectKey(
 	}
 }
 
-function subWeaponDamageValue({
+export function subWeaponDamageValue({
 	baseValue,
 	subWeaponId,
 	abilityPoints,
@@ -996,10 +1001,13 @@ function superJumpTimeGroundFrames(
 	};
 }
 
+const STEALTH_JUMP_EXTRA_FRAMES = 60;
 function superJumpTimeTotal(
 	args: StatFunctionInput,
 ): AnalyzedBuild["stats"]["superJumpTimeTotal"] {
 	const SUPER_JUMP_TIME_TOTAL_ABILITY = "QSJ";
+	const hasStealthJump = args.mainOnlyAbilities.includes("SJ");
+	const stealthJumpExtraFrames = hasStealthJump ? STEALTH_JUMP_EXTRA_FRAMES : 0;
 
 	const charge = abilityPointsToEffects({
 		abilityPoints: apFromMap({
@@ -1022,8 +1030,12 @@ function superJumpTimeTotal(
 		baseValue: framesToSeconds(
 			Math.ceil(charge.baseEffect) + Math.ceil(move.baseEffect),
 		),
-		value: framesToSeconds(Math.ceil(charge.effect) + Math.ceil(move.effect)),
-		modifiedBy: SUPER_JUMP_TIME_TOTAL_ABILITY,
+		value: framesToSeconds(
+			Math.ceil(charge.effect) +
+				Math.ceil(move.effect) +
+				stealthJumpExtraFrames,
+		),
+		modifiedBy: [SUPER_JUMP_TIME_TOTAL_ABILITY, "SJ"],
 	};
 }
 

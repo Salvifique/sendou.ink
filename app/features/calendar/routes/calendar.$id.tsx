@@ -1,13 +1,13 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
-import { Link } from "@remix-run/react/dist/components";
 import clsx from "clsx";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { LinkButton, SendouButton } from "~/components/elements/Button";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
 import { Image } from "~/components/Image";
+import { LocaleTime } from "~/components/LocaleTime";
 import { Main } from "~/components/Main";
 import { MapPoolStages } from "~/components/MapPoolSelector";
 import { Placement } from "~/components/Placement";
@@ -15,7 +15,6 @@ import { Section } from "~/components/Section";
 import { Table } from "~/components/Table";
 import { useUser } from "~/features/auth/core/user";
 import { MapPool } from "~/features/map-list-generator/core/map-pool";
-import { useIsMounted } from "~/hooks/useIsMounted";
 import { databaseTimestampToDate } from "~/utils/dates";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
@@ -28,8 +27,9 @@ import {
 	resolveBaseUrl,
 	userPage,
 } from "~/utils/urls";
-import { metaTags } from "../../../utils/remix";
+import { metaTags, type SerializeFrom } from "../../../utils/remix";
 import { action } from "../actions/calendar.$id.server";
+import styles from "../calendar-event.module.css";
 import {
 	canDeleteCalendarEvent,
 	canEditCalendarEvent,
@@ -37,9 +37,8 @@ import {
 } from "../calendar-utils";
 import { Tags } from "../components/Tags";
 import { loader } from "../loaders/calendar.$id.server";
-export { loader, action };
 
-import "~/styles/calendar-event.css";
+export { action, loader };
 
 export const meta: MetaFunction = (args) => {
 	const data = args.data as SerializeFrom<typeof loader>;
@@ -80,17 +79,16 @@ export const handle: SendouRouteHandle = {
 export default function CalendarEventPage() {
 	const user = useUser();
 	const data = useLoaderData<typeof loader>();
-	const { i18n, t } = useTranslation(["common", "calendar"]);
-	const isMounted = useIsMounted();
+	const { t } = useTranslation(["common", "calendar"]);
 
 	return (
 		<Main className="stack lg">
 			<section className="stack sm">
-				<div className="event__times">
+				<div className={styles.times}>
 					{data.event.startTimes.map((startTime, i) => (
 						<React.Fragment key={startTime}>
 							<span
-								className={clsx("event__day", {
+								className={clsx(styles.day, {
 									hidden: data.event.startTimes.length === 1,
 								})}
 							>
@@ -98,21 +96,17 @@ export default function CalendarEventPage() {
 									number: i + 1,
 								})}
 							</span>
-							<time dateTime={databaseTimestampToDate(startTime).toISOString()}>
-								{isMounted
-									? databaseTimestampToDate(startTime).toLocaleDateString(
-											i18n.language,
-											{
-												hour: "numeric",
-												minute: "numeric",
-												day: "numeric",
-												month: "long",
-												weekday: "long",
-												year: "numeric",
-											},
-										)
-									: null}
-							</time>
+							<LocaleTime
+								date={startTime}
+								options={{
+									hour: "numeric",
+									minute: "numeric",
+									day: "numeric",
+									month: "numeric",
+									weekday: "long",
+									year: "numeric",
+								}}
+							/>
 						</React.Fragment>
 					))}
 				</div>
@@ -203,9 +197,9 @@ function Results() {
 	);
 
 	return (
-		<Section title={t("calendar:results")} className="event__results-section">
+		<Section title={t("calendar:results")} className={styles.resultsSection}>
 			{data.event.participantCount && (
-				<div className="event__results-participant-count">
+				<div className={styles.resultsParticipantCount}>
 					{isTeamResults
 						? t("calendar:participatedCount", {
 								count: data.event.participantCount,
@@ -231,7 +225,7 @@ function Results() {
 							</td>
 							<td>{result.teamName}</td>
 							<td>
-								<ul className="event__results-players">
+								<ul className={styles.resultsPlayers}>
 									{result.players.map((player) => {
 										return (
 											<li
@@ -273,10 +267,10 @@ function MapPoolInfo() {
 
 	return (
 		<Section title={t("calendar:forms.mapPool")}>
-			<div className="event__map-pool-section">
+			<div className={styles.mapPoolSection}>
 				<MapPoolStages mapPool={mapPool} />
 				<LinkButton
-					className="event__create-map-list-link"
+					className={styles.createMapListLink}
 					to={mapsPageWithMapPool(mapPool)}
 					variant="outlined"
 					size="small"
@@ -296,7 +290,7 @@ function Description() {
 	return (
 		<Section title={t("forms.description")}>
 			<div className="stack sm">
-				<div className="event__author">
+				<div className={styles.author}>
 					<Avatar user={data.event} size="xs" />
 					{data.event.username}
 				</div>

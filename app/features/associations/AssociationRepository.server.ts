@@ -1,9 +1,12 @@
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
 import { db } from "~/db/sql";
-import type { TablesInsertable, TablesUpdatable } from "~/db/tables";
+import type { TablesInsertable } from "~/db/tables";
 import type { AssociationVirtualIdentifier } from "~/features/associations/associations-constants";
+import { ASSOCIATION } from "~/features/associations/associations-constants";
+import * as FriendRepository from "~/features/friends/FriendRepository.server";
+import { LimitReachedError } from "~/utils/errors";
 import { shortNanoid } from "~/utils/id";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
+import { commonUserSelect } from "~/utils/kysely.server";
 import { logger } from "~/utils/logger";
 
 interface FindOptions {
@@ -26,6 +29,7 @@ export async function findByMemberUserId(
 	return {
 		actual: await findBy({ type: "user", userId }, options),
 		virtual: await virtualAssociationsByUserId(userId),
+		friendIds: await FriendRepository.findFriendIds(userId),
 	};
 }
 
@@ -57,7 +61,10 @@ const baseFindQuery = (options: FindOptions) =>
 						.selectFrom("AssociationMember")
 						.innerJoin("User", "User.id", "AssociationMember.userId")
 						.whereRef("AssociationMember.associationId", "=", "Association.id")
-						.select([...COMMON_USER_FIELDS, "AssociationMember.role"]),
+						.select((eb) => [
+							...commonUserSelect(eb),
+							"AssociationMember.role",
+						]),
 				).as("members"),
 			),
 		);
@@ -92,6 +99,10 @@ async function findBy(
 	}));
 }
 
+const DEFAULT_VIRTUAL_ASSOCIATIONS: Array<AssociationVirtualIdentifier> = [
+	"FRIENDS",
+];
+
 async function virtualAssociationsByUserId(
 	userId: number,
 ): Promise<Array<AssociationVirtualIdentifier>> {
@@ -101,14 +112,16 @@ async function virtualAssociationsByUserId(
 			.select(["PlusTier.tier as plusTier"])
 			.where("userId", "=", userId)
 			.executeTakeFirst()) ?? {};
-	if (!plusTier) return [];
+	if (!plusTier) return [...DEFAULT_VIRTUAL_ASSOCIATIONS];
 
-	if (plusTier === 1) return ["+1", "+2", "+3"] as const;
-	if (plusTier === 2) return ["+2", "+3"] as const;
-	if (plusTier === 3) return ["+3"] as const;
+	if (plusTier === 1)
+		return [...DEFAULT_VIRTUAL_ASSOCIATIONS, "+1", "+2", "+3"] as const;
+	if (plusTier === 2)
+		return [...DEFAULT_VIRTUAL_ASSOCIATIONS, "+2", "+3"] as const;
+	if (plusTier === 3) return [...DEFAULT_VIRTUAL_ASSOCIATIONS, "+3"] as const;
 
 	logger.error("Invalid plusTier", { plusTier });
-	return [];
+	return [...DEFAULT_VIRTUAL_ASSOCIATIONS];
 }
 
 type InsertArgs = Omit<TablesInsertable["Association"], "inviteCode"> & {
@@ -137,18 +150,23 @@ export function insert({ userId, ...associationArgs }: InsertArgs) {
 			.insertInto("AssociationMember")
 			.values({ userId, associationId: association.id, role: "ADMIN" })
 			.execute();
-	});
-}
 
-export function update(
-	associationId: number,
-	args: Partial<TablesUpdatable["Association"]>,
-) {
-	return db
-		.updateTable("Association")
-		.set(args)
-		.where("id", "=", associationId)
-		.execute();
+		const { count, patronTier } = await trx
+			.selectFrom("AssociationMember")
+			.innerJoin("User", "User.id", "AssociationMember.userId")
+			.select((eb) => [eb.fn.countAll<number>().as("count"), "User.patronTier"])
+			.where("AssociationMember.userId", "=", userId)
+			.executeTakeFirstOrThrow();
+
+		const maxCount =
+			(patronTier ?? 0) >= 2
+				? ASSOCIATION.MAX_COUNT_SUPPORTER
+				: ASSOCIATION.MAX_COUNT_REGULAR_USER;
+
+		if (count > maxCount) {
+			throw new LimitReachedError("Max amount of associations reached");
+		}
+	});
 }
 
 export function refreshInviteCode(associationId: number) {

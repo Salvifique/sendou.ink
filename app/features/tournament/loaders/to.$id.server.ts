@@ -1,16 +1,33 @@
-import type { LoaderFunctionArgs, SerializeFrom } from "@remix-run/node";
+import { isAfter, subDays } from "date-fns";
+import type { LoaderFunctionArgs } from "react-router";
 import { getUser } from "~/features/auth/core/user.server";
 import * as TournamentRepository from "~/features/tournament/TournamentRepository.server";
+import {
+	LEAGUES,
+	TOURNAMENT,
+} from "~/features/tournament/tournament-constants";
 import { tournamentDataCached } from "~/features/tournament-bracket/core/Tournament.server";
+import * as TournamentMatchVodRepository from "~/features/tournament-bracket/TournamentMatchVodRepository.server";
 import { databaseTimestampToDate } from "~/utils/dates";
 import { parseParams } from "~/utils/remix.server";
 import { idObject } from "~/utils/zod";
-import { streamsByTournamentId } from "../core/streams.server";
 
-export type TournamentLoaderData = SerializeFrom<typeof loader>;
+export type TournamentLoaderData = {
+	tournament: Awaited<ReturnType<typeof tournamentDataCached>>;
+	streamingParticipants: number[];
+	streamsCount: number;
+	hasChildTournaments: boolean;
+	friendCodes:
+		| Awaited<ReturnType<typeof TournamentRepository.friendCodesByTournamentId>>
+		| undefined;
+	preparedMaps:
+		| Awaited<ReturnType<typeof TournamentRepository.findPreparedMapsById>>
+		| undefined;
+	vods: TournamentMatchVodRepository.VodsByTournamentId | undefined;
+};
 
-export const loader = async ({ params, request }: LoaderFunctionArgs) => {
-	const user = await getUser(request);
+export const loader = async ({ params }: LoaderFunctionArgs) => {
+	const user = getUser();
 	const { id: tournamentId } = parseParams({
 		params,
 		schema: idObject,
@@ -18,14 +35,11 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 
 	const tournament = await tournamentDataCached({ tournamentId, user });
 
-	const streams =
-		tournament.data.stage.length > 0 && !tournament.ctx.isFinalized
-			? await streamsByTournamentId(tournament.ctx)
-			: [];
-
-	const tournamentStartedInTheLastMonth =
-		databaseTimestampToDate(tournament.ctx.startTime) >
-		new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+	const friendCodeVisibilityDays = tournament.ctx.parentTournamentId ? 120 : 30;
+	const tournamentStartedRecently = isAfter(
+		databaseTimestampToDate(tournament.ctx.startTime),
+		subDays(new Date(), friendCodeVisibilityDays),
+	);
 	const isTournamentAdmin =
 		tournament.ctx.author.id === user?.id ||
 		tournament.ctx.staff.some(
@@ -43,12 +57,30 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 		tournament.ctx.organization?.members.some(
 			(m) => m.userId === user?.id && m.role === "ORGANIZER",
 		);
-	const showFriendCodes = tournamentStartedInTheLastMonth && isTournamentAdmin;
+	if (tournament.ctx.settings.isDraft && !isTournamentOrganizer) {
+		throw new Response(null, { status: 404 });
+	}
 
-	return {
+	const showFriendCodes = tournamentStartedRecently && isTournamentAdmin;
+
+	const isLeagueSignup = Object.values(LEAGUES)
+		.flat()
+		.some((entry) => entry.tournamentId === tournamentId);
+	const hasChildTournaments = isLeagueSignup
+		? await TournamentRepository.hasChildTournaments(tournamentId)
+		: false;
+
+	const showVods =
+		tournament.ctx.isFinalized &&
+		isAfter(
+			databaseTimestampToDate(tournament.ctx.startTime),
+			subDays(new Date(), TOURNAMENT.VOD_VISIBILITY_DAYS),
+		);
+
+	// skip expensive rr7 data serialization (hot path loader)
+	return JSON.stringify({
 		tournament,
-		streamingParticipants: streams.flatMap((s) => (s.userId ? [s.userId] : [])),
-		streamsCount: streams.length,
+		hasChildTournaments,
 		friendCodes: showFriendCodes
 			? await TournamentRepository.friendCodesByTournamentId(tournamentId)
 			: undefined,
@@ -56,5 +88,8 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 			isTournamentOrganizer && !tournament.ctx.isFinalized
 				? await TournamentRepository.findPreparedMapsById(tournamentId)
 				: undefined,
-	};
+		vods: showVods
+			? await TournamentMatchVodRepository.findVodsByTournamentId(tournamentId)
+			: undefined,
+	});
 };

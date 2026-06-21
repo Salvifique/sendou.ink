@@ -9,19 +9,20 @@ import {
 	rangeToMonthYear,
 } from "~/features/plus-voting/core";
 import invariant from "~/utils/invariant";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
+import { commonUserSelect } from "~/utils/kysely.server";
 import type { Unwrapped } from "~/utils/types";
+import * as PlusVoting from "./core/PlusVoting";
 
 const resultsByMonthYearQuery = (args: MonthYear) =>
 	db
 		.selectFrom("PlusVotingResult")
 		.innerJoin("User", "PlusVotingResult.votedId", "User.id")
-		.select([
-			...COMMON_USER_FIELDS,
+		.select((eb) => [
+			...commonUserSelect(eb),
 			"PlusVotingResult.wasSuggested",
-			"PlusVotingResult.passedVoting",
 			"PlusVotingResult.tier",
 			"PlusVotingResult.score",
+			"PlusVotingResult.votedId",
 		])
 		.where("PlusVotingResult.month", "=", args.month)
 		.where("PlusVotingResult.year", "=", args.year)
@@ -30,27 +31,85 @@ type ResultsByMonthYearQueryReturnType = InferResult<
 	ReturnType<typeof resultsByMonthYearQuery>
 >;
 
-export function allPlusTiersFromLatestVoting() {
-	return db
-		.selectFrom("FreshPlusTier")
-		.select(["FreshPlusTier.userId", "FreshPlusTier.tier as plusTier"])
-		.where("FreshPlusTier.tier", "is not", null)
-		.execute() as Promise<{ userId: number; plusTier: number }[]>;
+export async function allPlusTiersFromLatestVoting() {
+	const rows = await db
+		.selectFrom("PlusVotingResult")
+		.select([
+			"PlusVotingResult.votedId",
+			"PlusVotingResult.tier",
+			"PlusVotingResult.score",
+			"PlusVotingResult.wasSuggested",
+		])
+		.where(
+			"PlusVotingResult.year",
+			"=",
+			db
+				.selectFrom("PlusVote")
+				.select("PlusVote.year")
+				.where("PlusVote.validAfter", "<", sql<number>`strftime('%s', 'now')`)
+				.orderBy("PlusVote.year", "desc")
+				.orderBy("PlusVote.month", "desc")
+				.limit(1),
+		)
+		.where(
+			"PlusVotingResult.month",
+			"=",
+			db
+				.selectFrom("PlusVote")
+				.select("PlusVote.month")
+				.where("PlusVote.validAfter", "<", sql<number>`strftime('%s', 'now')`)
+				.orderBy("PlusVote.year", "desc")
+				.orderBy("PlusVote.month", "desc")
+				.limit(1),
+		)
+		.execute();
+
+	const withPassed = PlusVoting.computePassedVoting(rows);
+	return PlusVoting.computeFreshPlusTiers(withPassed);
 }
 
 export type ResultsByMonthYearItem = Unwrapped<typeof resultsByMonthYear>;
 export async function resultsByMonthYear(args: MonthYear) {
 	const rows = await resultsByMonthYearQuery(args).execute();
 
-	return groupPlusVotingResults(rows);
+	const passedMap = new Map<
+		string,
+		{ passedVoting: number; wasSuggested: number }
+	>();
+	const rawForVoting = rows.map((row) => ({
+		votedId: row.votedId,
+		tier: row.tier,
+		score: row.score,
+		wasSuggested: row.wasSuggested,
+	}));
+	for (const r of PlusVoting.computePassedVoting(rawForVoting)) {
+		passedMap.set(`${r.votedId}-${r.tier}`, {
+			passedVoting: r.passedVoting,
+			wasSuggested: r.wasSuggested,
+		});
+	}
+
+	const enrichedRows = rows.map((row) => {
+		const computed = passedMap.get(`${row.votedId}-${row.tier}`);
+		return {
+			...row,
+			passedVoting: computed?.passedVoting ?? 0,
+		};
+	});
+
+	return groupPlusVotingResults(enrichedRows);
 }
 
-function groupPlusVotingResults(rows: ResultsByMonthYearQueryReturnType) {
+type EnrichedRow = ResultsByMonthYearQueryReturnType[number] & {
+	passedVoting: number;
+};
+
+function groupPlusVotingResults(rows: EnrichedRow[]) {
 	const grouped: Record<
 		number,
 		{
-			passed: ResultsByMonthYearQueryReturnType;
-			failed: ResultsByMonthYearQueryReturnType;
+			passed: EnrichedRow[];
+			failed: EnrichedRow[];
 		}
 	> = {};
 
@@ -77,7 +136,7 @@ export type UsersForVoting = {
 	user: Pick<
 		Tables["User"],
 		"id" | "discordId" | "username" | "discordAvatar" | "bio"
-	>;
+	> & { customAvatarUrl: string | null };
 	suggestion?: PlusSuggestionRepository.FindAllByMonthItem;
 }[];
 
@@ -88,7 +147,7 @@ export async function usersForVoting(loggedInUser: {
 	const members = await db
 		.selectFrom("User")
 		.innerJoin("PlusTier", "PlusTier.userId", "User.id")
-		.select([...COMMON_USER_FIELDS, "User.bio"])
+		.select((eb) => [...commonUserSelect(eb), "User.bio"])
 		.where("PlusTier.tier", "=", loggedInUser.plusTier)
 		.execute();
 
@@ -108,6 +167,7 @@ export async function usersForVoting(loggedInUser: {
 				discordId: member.discordId,
 				username: member.username,
 				discordAvatar: member.discordAvatar,
+				customAvatarUrl: member.customAvatarUrl,
 				bio: member.bio,
 			},
 		});
@@ -120,6 +180,7 @@ export async function usersForVoting(loggedInUser: {
 				discordId: suggestion.suggested.discordId,
 				username: suggestion.suggested.username,
 				discordAvatar: suggestion.suggested.discordAvatar,
+				customAvatarUrl: suggestion.suggested.customAvatarUrl,
 				bio: suggestion.suggested.bio,
 			},
 			suggestion,

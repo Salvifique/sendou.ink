@@ -1,11 +1,7 @@
 import type { PlaywrightTestConfig } from "@playwright/test";
 import { devices } from "@playwright/test";
 
-/**
- * Read environment variables from file.
- * https://github.com/motdotla/dotenv
- */
-// require('dotenv').config();
+const WORKER_COUNT = Number(process.env.E2E_WORKERS) || 4;
 
 /**
  * See https://playwright.dev/docs/test-configuration.
@@ -25,21 +21,24 @@ const config: PlaywrightTestConfig = {
 	fullyParallel: true,
 	/* Fail the build on CI if you accidentally left test.only in the source code. */
 	forbidOnly: !!process.env.CI,
-	retries: 2,
-	/* Opt out of parallel tests. */
-	workers: 1,
+	retries: 0,
+	/* Number of parallel workers */
+	workers: WORKER_COUNT,
 	/* Reporter to use. See https://playwright.dev/docs/test-reporters */
 	reporter: "list",
+	/* Global setup and teardown for managing multiple server instances */
+	globalSetup: "./e2e/global-setup.ts",
+	globalTeardown: "./e2e/global-teardown.ts",
 	/* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
 	use: {
 		/* Maximum time each action such as `click()` can take. Defaults to 0 (no limit). */
 		actionTimeout: 0,
-		/* Base URL to use in actions like `await page.goto('/')`. */
-		baseURL: "http://localhost:5173",
+		/* Base URL will be set per-worker by the fixture */
+		baseURL: "http://localhost:6173",
 
 		trace: "retain-on-failure",
 
-		permissions: ["clipboard-read"],
+		permissions: ["clipboard-read", "clipboard-write"],
 	},
 
 	/* Configure projects for major browsers */
@@ -97,12 +96,6 @@ const config: PlaywrightTestConfig = {
 	/* Folder for test artifacts such as screenshots, videos, traces, etc. */
 	// outputDir: 'test-results/',
 
-	/* Run your local dev server before starting the tests */
-	webServer: {
-		command: "npm run dev",
-		port: 5173,
-		reuseExistingServer: !process.env.CI,
-	},
 	build: {
 		external: ["**/*.json"],
 	},

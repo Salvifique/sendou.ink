@@ -1,7 +1,7 @@
-import type { MetaFunction } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { SendouButton } from "~/components/elements/Button";
 import { SendouPopover } from "~/components/elements/Popover";
@@ -11,23 +11,25 @@ import type {
 	TournamentData,
 	TournamentDataTeam,
 } from "~/features/tournament-bracket/core/Tournament.server";
-import type { TournamentMaplistSource } from "~/modules/tournament-map-list-generator";
+import type { TournamentMaplistSource } from "~/modules/tournament-map-list-generator/types";
 import { metaTags } from "~/utils/remix";
 import {
 	teamPage,
 	tournamentMatchPage,
 	tournamentTeamPage,
 	userPage,
-	userSubmittedImage,
 } from "~/utils/urls";
 import { TeamWithRoster } from "../components/TeamWithRoster";
+import * as Standings from "../core/Standings";
 import type { PlayedSet } from "../core/sets.server";
 import { loader } from "../loaders/to.$id.teams.$tid.server";
+import styles from "../tournament.module.css";
 import { useTournament } from "./to.$id";
+
 export { loader };
 
 export const meta: MetaFunction<typeof loader> = (args) => {
-	const tournamentData = (args.matches[1].data as any)
+	const tournamentData = JSON.parse(args.matches[1].data as any)
 		?.tournament as TournamentData;
 	if (!args.data || !tournamentData) return [];
 
@@ -41,7 +43,7 @@ export const meta: MetaFunction<typeof loader> = (args) => {
 		description: `${team.name} roster (${team.members.map((m) => m.username).join(", ")}) and sets in ${tournamentData.ctx.name}.`,
 		image: teamLogoUrl
 			? {
-					url: userSubmittedImage(teamLogoUrl),
+					url: teamLogoUrl,
 					dimensions: { width: 124, height: 124 },
 				}
 			: undefined,
@@ -86,7 +88,7 @@ export default function TournamentTeamPage() {
 					teamsCount={tournament.ctx.teams.length}
 				/>
 			) : null}
-			<div className="tournament__team__sets">
+			<div className={styles.teamSets}>
 				{data.sets.map((set) => {
 					return <SetInfo key={set.tournamentMatchId} set={set} team={team} />;
 				})}
@@ -106,7 +108,9 @@ function StatSquares({
 	const data = useLoaderData<typeof loader>();
 	const tournament = useTournament();
 
-	const placement = tournament.standings.find(
+	const standingsResult = Standings.tournamentStandings(tournament);
+	const overallStandings = Standings.flattenStandings(standingsResult);
+	const placement = overallStandings.find(
 		(s) => s.team.id === data.tournamentTeamId,
 	)?.placement;
 
@@ -116,46 +120,44 @@ function StatSquares({
 	)?.placement;
 
 	return (
-		<div className="tournament__team__stats">
-			<div className="tournament__team__stat">
-				<div className="tournament__team__stat__title">
+		<div className={styles.teamStats}>
+			<div className={styles.teamStat}>
+				<div className={styles.teamStatTitle}>
 					{t("tournament:team.setWins")}
 				</div>
-				<div className="tournament__team__stat__main">
+				<div className={styles.teamStatMain}>
 					{data.winCounts.sets.won} / {data.winCounts.sets.total}
 				</div>
-				<div className="tournament__team__stat__sub">
+				<div className={styles.teamStatSub}>
 					{data.winCounts.sets.percentage}%
 				</div>
 			</div>
 
-			<div className="tournament__team__stat">
-				<div className="tournament__team__stat__title">
+			<div className={styles.teamStat}>
+				<div className={styles.teamStatTitle}>
 					{t("tournament:team.mapWins")}
 				</div>
-				<div className="tournament__team__stat__main">
+				<div className={styles.teamStatMain}>
 					{data.winCounts.maps.won} / {data.winCounts.maps.total}
 				</div>
-				<div className="tournament__team__stat__sub">
+				<div className={styles.teamStatSub}>
 					{data.winCounts.maps.percentage}%
 				</div>
 			</div>
 
-			<div className="tournament__team__stat">
-				<div className="tournament__team__stat__title">
-					{t("tournament:team.seed")}
-				</div>
-				<div className="tournament__team__stat__main">{seed}</div>
-				<div className="tournament__team__stat__sub">
+			<div className={styles.teamStat}>
+				<div className={styles.teamStatTitle}>{t("tournament:team.seed")}</div>
+				<div className={styles.teamStatMain}>{seed}</div>
+				<div className={styles.teamStatSub}>
 					{t("tournament:team.seed.footer", { count: teamsCount })}
 				</div>
 			</div>
 
-			<div className="tournament__team__stat">
-				<div className="tournament__team__stat__title">
+			<div className={styles.teamStat}>
+				<div className={styles.teamStatTitle}>
 					{t("tournament:team.placement")}
 				</div>
-				<div className="tournament__team__stat__main">
+				<div className={styles.teamStatMain}>
 					{placement ? <Placement placement={placement} textOnly /> : "-"}
 					{undergroundPlacement ? (
 						<>
@@ -165,8 +167,17 @@ function StatSquares({
 					) : null}
 				</div>
 				{undergroundPlacement ? (
-					<div className="tournament__team__stat__sub">
+					<div className={styles.teamStatSub}>
 						{t("tournament:team.placement.footer")}
+					</div>
+				) : null}
+				{standingsResult.type === "multi" ? (
+					<div className={styles.teamStatSub}>
+						{
+							standingsResult.standings.find((s) =>
+								s.standings.some((s) => s.team.id === data.tournamentTeamId),
+							)?.div
+						}
 					</div>
 				) : null}
 			</div>
@@ -178,7 +189,7 @@ function SetInfo({ set, team }: { set: PlayedSet; team: TournamentDataTeam }) {
 	const { t } = useTranslation(["tournament"]);
 	const tournament = useTournament();
 
-	const sourceToText = (source: TournamentMaplistSource) => {
+	const sourceToText = (source: TournamentMaplistSource, mapIndex: number) => {
 		switch (source) {
 			case "BOTH":
 				return t("tournament:pickInfo.both");
@@ -186,6 +197,19 @@ function SetInfo({ set, team }: { set: PlayedSet; team: TournamentDataTeam }) {
 				return t("tournament:pickInfo.default");
 			case "TIEBREAKER":
 				return t("tournament:pickInfo.tiebreaker");
+			case "COUNTERPICK": {
+				if (mapIndex > 0) {
+					const previousMap = set.maps[mapIndex - 1];
+					const counterpickerName =
+						previousMap.result === "win" ? set.opponent.name : team.name;
+					return t("tournament:pickInfo.team.counterpick", {
+						team: counterpickerName,
+					});
+				}
+				return t("tournament:pickInfo.counterpick");
+			}
+			case "TO":
+				return null;
 			default: {
 				const teamName =
 					source === set.opponent.id ? set.opponent.name : team.name;
@@ -196,20 +220,18 @@ function SetInfo({ set, team }: { set: PlayedSet; team: TournamentDataTeam }) {
 	};
 
 	const { bracketName, roundNameWithoutMatchIdentifier } =
-		tournament.matchNameById(set.tournamentMatchId);
+		tournament.matchContextNamesById(set.tournamentMatchId);
 
 	return (
-		<div className="tournament__team__set">
-			<div className="tournament__team__set__top-container">
-				<div className="tournament__team__set__score">
-					{set.score.join("-")}
-				</div>
+		<div className={styles.teamSet}>
+			<div className={styles.teamSetTopContainer}>
+				<div className={styles.teamSetScore}>{set.score.join("-")}</div>
 				<Link
 					to={tournamentMatchPage({
 						matchId: set.tournamentMatchId,
 						tournamentId: tournament.ctx.id,
 					})}
-					className="tournament__team__set__round-name"
+					className={styles.teamSetRoundName}
 				>
 					{roundNameWithoutMatchIdentifier}{" "}
 					{tournament.ctx.settings.bracketProgression.length > 1 ? (
@@ -217,7 +239,7 @@ function SetInfo({ set, team }: { set: PlayedSet; team: TournamentDataTeam }) {
 					) : null}
 				</Link>
 			</div>
-			<div className="overlap-divider">
+			<div className={styles.overlapDivider}>
 				<div className="stack horizontal sm">
 					{set.maps.map(({ stageId, modeShort, result, source }, i) => {
 						return (
@@ -228,45 +250,45 @@ function SetInfo({ set, team }: { set: PlayedSet; team: TournamentDataTeam }) {
 										<ModeImage
 											mode={modeShort}
 											size={20}
-											containerClassName={clsx("tournament__team__set__mode", {
-												tournament__team__set__mode__loss: result === "loss",
+											containerClassName={clsx(styles.teamSetMode, {
+												[styles.teamSetModeLoss]: result === "loss",
 											})}
 										/>
 									</SendouButton>
 								}
 								placement="top"
 							>
-								<div className="tournament__team__set__stage-container">
+								<div className={styles.teamSetStageContainer}>
 									<StageImage
 										stageId={stageId}
 										width={125}
 										className="rounded-sm"
 									/>
-									{sourceToText(source)}
+									{sourceToText(source, i)}
 								</div>
 							</SendouPopover>
 						);
 					})}
 				</div>
 			</div>
-			<div className="tournament__team__set__opponent">
-				<div className="tournament__team__set__opponent__vs">vs.</div>
+			<div className={styles.teamSetOpponent}>
+				<div className={styles.teamSetOpponentVs}>vs.</div>
 				<Link
 					to={tournamentTeamPage({
 						tournamentTeamId: set.opponent.id,
 						tournamentId: tournament.ctx.id,
 					})}
-					className="tournament__team__set__opponent__team"
+					className={styles.teamSetOpponentTeam}
 				>
 					{set.opponent.name}
 				</Link>
-				<div className="tournament__team__set__opponent__members">
+				<div className={styles.teamSetOpponentMembers}>
 					{set.opponent.roster.map((user) => {
 						return (
 							<Link
 								to={userPage(user)}
 								key={user.id}
-								className="tournament__team__set__opponent__member"
+								className={styles.teamSetOpponentMember}
 							>
 								<Avatar user={user} size="xxs" />
 								{user.username}

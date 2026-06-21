@@ -1,8 +1,7 @@
 // this file offers database functions specifically for the crud.server.ts file
 
-import { nanoid } from "nanoid";
 import { sql } from "~/db/sql";
-import type { Tables, TournamentRoundMaps } from "~/db/tables";
+import type { Tables } from "~/db/tables";
 import type {
 	Group as GroupType,
 	Match as MatchType,
@@ -10,6 +9,7 @@ import type {
 	Stage as StageType,
 } from "~/modules/brackets-model";
 import { dateToDatabaseTimestamp } from "~/utils/dates";
+import { shortNanoid } from "~/utils/id";
 
 const stage_getByIdStm = sql.prepare(/*sql*/ `
   select
@@ -243,20 +243,17 @@ export class Round {
 	stageId: Tables["TournamentRound"]["stageId"];
 	groupId: Tables["TournamentRound"]["groupId"];
 	number: Tables["TournamentRound"]["number"];
-	maps: Pick<TournamentRoundMaps, "count" | "type">;
 
 	constructor(
 		id: Tables["TournamentRound"]["id"] | undefined,
 		stageId: Tables["TournamentRound"]["stageId"],
 		groupId: Tables["TournamentRound"]["groupId"],
 		number: Tables["TournamentRound"]["number"],
-		maps: Pick<TournamentRoundMaps, "count" | "type">,
 	) {
 		this.id = id;
 		this.stageId = stageId;
 		this.groupId = groupId;
 		this.number = number;
-		this.maps = maps;
 	}
 
 	insert() {
@@ -332,11 +329,12 @@ const match_getByRoundIdStm = sql.prepare(/*sql*/ `
 `);
 
 const match_getByStageIdStm = sql.prepare(/*sql*/ `
-  select 
-    "TournamentMatch".*, 
+  select
+    "TournamentMatch".*,
     sum("TournamentMatchGameResult"."opponentOnePoints") as "opponentOnePointsTotal",
     sum("TournamentMatchGameResult"."opponentTwoPoints") as "opponentTwoPointsTotal",
-    max("TournamentMatchGameResult"."createdAt") as "lastGameFinishedAt"
+    sum(case when "TournamentMatchGameResult"."opponentOnePoints" = 100 and "TournamentMatchGameResult"."opponentTwoPoints" = 0 then 1 else 0 end) as "opponentOneKosTotal",
+    sum(case when "TournamentMatchGameResult"."opponentTwoPoints" = 100 and "TournamentMatchGameResult"."opponentOnePoints" = 0 then 1 else 0 end) as "opponentTwoKosTotal"
   from "TournamentMatch"
   left join "TournamentMatchGameResult" on "TournamentMatch"."id" = "TournamentMatchGameResult"."matchId"
   where "TournamentMatch"."stageId" = @stageId
@@ -353,9 +351,9 @@ const match_getByRoundAndNumberStm = sql.prepare(/*sql*/ `
 const match_insertStm = sql.prepare(/*sql*/ `
   insert into
     "TournamentMatch"
-    ("roundId", "stageId", "groupId", "number", "opponentOne", "opponentTwo", "status", "chatCode")
+    ("roundId", "stageId", "groupId", "number", "opponentOne", "opponentTwo", "status", "chatCode", "startedAt")
   values
-    (@roundId, @stageId, @groupId, @number, @opponentOne, @opponentTwo, @status, @chatCode)
+    (@roundId, @stageId, @groupId, @number, @opponentOne, @opponentTwo, @status, @chatCode, @startedAt)
   returning *
 `);
 
@@ -390,9 +388,6 @@ export class Match {
 		groupId: Tables["TournamentMatch"]["groupId"],
 		roundId: Tables["TournamentMatch"]["roundId"],
 		number: Tables["TournamentMatch"]["number"],
-		_unknown1: null,
-		_unknown2: null,
-		_unknown3: null,
 		opponentOne: string,
 		opponentTwo: string,
 	) {
@@ -412,8 +407,9 @@ export class Match {
 			opponentTwo: string;
 			opponentOnePointsTotal: number | null;
 			opponentTwoPointsTotal: number | null;
-			lastGameFinishedAt: number | null;
-			createdAt: number | null;
+			opponentOneKosTotal: number | null;
+			opponentTwoKosTotal: number | null;
+			startedAt: number | null;
 		},
 	): MatchType {
 		return {
@@ -426,6 +422,7 @@ export class Match {
 					: {
 							...JSON.parse(rawMatch.opponentOne),
 							totalPoints: rawMatch.opponentOnePointsTotal ?? undefined,
+							totalKos: rawMatch.opponentOneKosTotal ?? undefined,
 						},
 			opponent2:
 				rawMatch.opponentTwo === "null"
@@ -433,12 +430,12 @@ export class Match {
 					: {
 							...JSON.parse(rawMatch.opponentTwo),
 							totalPoints: rawMatch.opponentTwoPointsTotal ?? undefined,
+							totalKos: rawMatch.opponentTwoKosTotal ?? undefined,
 						},
 			round_id: rawMatch.roundId,
 			stage_id: rawMatch.stageId,
 			status: rawMatch.status,
-			lastGameFinishedAt: rawMatch.lastGameFinishedAt,
-			createdAt: rawMatch.createdAt,
+			startedAt: rawMatch.startedAt,
 		};
 	}
 
@@ -478,7 +475,8 @@ export class Match {
 			opponentOne: this.opponentOne ?? "null",
 			opponentTwo: this.opponentTwo ?? "null",
 			status: this.status,
-			chatCode: nanoid(10),
+			chatCode: shortNanoid(),
+			startedAt: null,
 		}) as any;
 
 		this.id = match.id;

@@ -1,17 +1,18 @@
-import { Link } from "@remix-run/react";
 import clsx from "clsx";
+import { ShieldMinus, Trophy, Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { SendouButton } from "~/components/elements/Button";
 import { SendouPopover } from "~/components/elements/Popover";
 import { Flag } from "~/components/Flag";
 import { Image, ModeImage } from "~/components/Image";
-import { TrophyIcon } from "~/components/icons/Trophy";
-import { UsersIcon } from "~/components/icons/Users";
+import { TierPill } from "~/components/TierPill";
 import { BadgeDisplay } from "~/features/badges/components/BadgeDisplay";
-import { HACKY_resolvePicture } from "~/features/tournament/tournament-utils";
-import { useIsMounted } from "~/hooks/useIsMounted";
+import { useFormatDistanceToNow } from "~/hooks/intl/useFormatDistanceToNow";
+import { useHydrated } from "~/hooks/useHydrated";
+import { useSpoilerFree } from "~/hooks/useSpoilerFree";
 import { databaseTimestampToDate } from "~/utils/dates";
-import { navIconUrl, userSubmittedImage } from "~/utils/urls";
+import { navIconUrl } from "~/utils/urls";
 import type { CalendarEvent, ShowcaseCalendarEvent } from "../calendar-types";
 import { Tags } from "./Tags";
 import styles from "./TournamentCard.module.css";
@@ -23,44 +24,32 @@ export function TournamentCard({
 	tournament: CalendarEvent | ShowcaseCalendarEvent;
 	className?: string;
 }) {
-	const isMounted = useIsMounted();
-	const { i18n } = useTranslation(["front", "common"]);
+	const isHydrated = useHydrated();
+	const formatDistanceToNow = useFormatDistanceToNow();
+	const { isCensored, reveal } = useSpoilerFree();
 
 	const isShowcase = tournament.type === "showcase";
 	const isCalendar = tournament.type === "calendar";
 	const isHostedOnSendouInk = typeof tournament.isRanked === "boolean";
 
-	const time = () => {
-		if (!isShowcase) return null;
-		if (!isMounted) return "Placeholder";
-
-		const date = databaseTimestampToDate(tournament.startTime);
-		return date.toLocaleString(i18n.language, {
-			month: "short",
-			day: "numeric",
-			hour: "numeric",
-			weekday: "short",
-			minute: date.getMinutes() !== 0 ? "numeric" : undefined,
-		});
-	};
+	const startDate = isShowcase
+		? databaseTimestampToDate(tournament.startTime)
+		: null;
 
 	return (
 		<div
 			className={clsx(className, styles.container, {
-				[styles.containerTall]: isShowcase && tournament.firstPlacer,
+				[styles.containerTall]:
+					isShowcase && tournament.firstPlacers.length > 0,
 			})}
 			data-testid="tournament-card"
 		>
 			<Link to={tournament.url} className={styles.card}>
 				<div className="stack horizontal justify-between">
-					{isHostedOnSendouInk ? (
+					{tournament.logoUrl ? (
 						<div className={styles.imgContainer}>
 							<img
-								src={
-									tournament.logoUrl
-										? userSubmittedImage(tournament.logoUrl)
-										: HACKY_resolvePicture(tournament)
-								}
+								src={tournament.logoUrl}
 								width={32}
 								height={32}
 								className={styles.avatarImg}
@@ -69,77 +58,136 @@ export function TournamentCard({
 						</div>
 					) : null}
 					{tournament.organization ? (
-						<div className={styles.org}>{tournament.organization.name}</div>
+						<div className={styles.org}>
+							<span>{tournament.organization.name}</span>
+						</div>
 					) : null}
 				</div>
 				<div
-					className={clsx(styles.name, {
+					className={clsx(styles.nameRow, {
 						"mt-3": !isHostedOnSendouInk,
 						"mt-1": isHostedOnSendouInk,
 					})}
 				>
-					{tournament.name}{" "}
-					{isShowcase ? (
-						<time
-							className={clsx(styles.time, {
-								invisible: !isMounted,
-							})}
-							dateTime={databaseTimestampToDate(
-								tournament.startTime,
-							).toISOString()}
-						>
-							{time()}
-						</time>
+					<div
+						className={clsx(styles.name, {
+							[styles.nameWithTier]:
+								tournament.tier || tournament.tentativeTier,
+						})}
+					>
+						{tournament.name}
+					</div>
+					{tournament.tier ? (
+						<TierPill tier={tournament.tier} />
+					) : tournament.tentativeTier ? (
+						<TierPill tier={tournament.tentativeTier} isTentative />
 					) : null}
 				</div>
+				{startDate ? (
+					<time
+						className={clsx(styles.time, {
+							invisible: !isHydrated,
+						})}
+						dateTime={startDate.toISOString()}
+					>
+						{isHydrated
+							? formatDistanceToNow(startDate, { addSuffix: true })
+							: "Placeholder"}
+					</time>
+				) : null}
 				{isCalendar ? (
 					<div className="stack sm items-center my-2">
 						<Tags tags={tournament.tags} small centered />
 					</div>
 				) : null}
-				{isShowcase && tournament.firstPlacer ? (
-					<TournamentFirstPlacers firstPlacer={tournament.firstPlacer} />
+				{isShowcase && tournament.firstPlacers.length > 0 ? (
+					<TournamentFirstPlacers
+						firstPlacers={tournament.firstPlacers}
+						censored={isCensored(tournament.id)}
+					/>
 				) : null}
 			</Link>
 			<div className="stack horizontal justify-between items-center">
-				{tournament.modes ? <ModesPill modes={tournament.modes} /> : null}
-				{isHostedOnSendouInk ? (
-					<div
-						className={clsx(styles.pillsContainer, {
-							[styles.lonely]: !tournament.modes,
-						})}
-					>
-						{tournament.isRanked ? (
-							<div className={clsx(styles.pill, styles.pillRanked)}>
-								<TrophyIcon title="Ranked (impacts this seasons SP)" />
-							</div>
-						) : null}
-						{isCalendar && tournament.badges && tournament.badges.length > 0 ? (
-							<BadgePrizesPill badges={tournament.badges} />
-						) : null}
-						<div className={styles.teamCount}>
-							<UsersIcon /> {tournament.teamsCount}
-						</div>
-					</div>
+				{isShowcase &&
+				tournament.firstPlacers.length > 0 &&
+				isCensored(tournament.id) ? (
+					<SpoilerRevealPill onReveal={() => reveal(tournament.id)} />
 				) : null}
+				{isShowcase && "hasVods" in tournament && tournament.hasVods ? (
+					<div className={styles.vodIndicator}>📺 VODs</div>
+				) : null}
+				{tournament.modes ? <ModesPill modes={tournament.modes} /> : null}
+				<div
+					className={clsx(styles.pillsContainer, {
+						[styles.lonely]: !tournament.modes && isHostedOnSendouInk,
+					})}
+				>
+					{tournament.isRanked ? (
+						<div className={clsx(styles.pill, styles.pillRanked)}>
+							<Trophy />
+						</div>
+					) : null}
+					{isCalendar && tournament.badges && tournament.badges.length > 0 ? (
+						<BadgePrizesPill badges={tournament.badges} />
+					) : null}
+					{isHostedOnSendouInk ? (
+						<div className={styles.teamCount}>
+							<Users /> {tournament.teamsCount}
+						</div>
+					) : null}
+				</div>
 			</div>
 		</div>
 	);
 }
 
 function TournamentFirstPlacers({
-	firstPlacer,
+	firstPlacers,
+	censored,
 }: {
-	firstPlacer: NonNullable<ShowcaseCalendarEvent["firstPlacer"]>;
+	firstPlacers: ShowcaseCalendarEvent["firstPlacers"];
+	censored: boolean;
+}) {
+	if (firstPlacers.length > 1) {
+		return (
+			<div className={styles.firstPlacers}>
+				<div className="stack md items-start">
+					{firstPlacers.map((placer) => (
+						<TournamentFirstPlacerTeamNameOnly
+							key={placer.div ?? placer.teamName}
+							placer={placer}
+							censored={censored}
+						/>
+					))}
+				</div>
+			</div>
+		);
+	}
+
+	const placer = firstPlacers[0];
+
+	return (
+		<div className={styles.firstPlacers}>
+			<TournamentFirstPlacerWithMembers placer={placer} censored={censored} />
+		</div>
+	);
+}
+
+function TournamentFirstPlacerWithMembers({
+	placer,
+	censored,
+}: {
+	placer: ShowcaseCalendarEvent["firstPlacers"][number];
+	censored: boolean;
 }) {
 	const { t } = useTranslation(["front"]);
 
 	return (
-		<div className={styles.firstPlacers}>
+		<>
 			<div className="stack xs horizontal items-center text-xs">
-				{firstPlacer.logoUrl ? (
+				{!censored && placer.logoUrl ? (
 					<img
-						src={userSubmittedImage(firstPlacer.logoUrl)}
+						src={placer.logoUrl}
 						alt=""
 						width={24}
 						className="rounded-full"
@@ -147,27 +195,67 @@ function TournamentFirstPlacers({
 				) : null}{" "}
 				<div className="stack items-start">
 					<span className={styles.firstPlacersTeamName}>
-						{firstPlacer.teamName}
+						{censored ? "???" : placer.teamName}
 					</span>
 					<div className="text-xxxs text-lighter font-bold text-uppercase">
 						{t("front:showcase.card.winner")}
+						{placer.div ? ` (${placer.div})` : null}
 					</div>
 				</div>
 			</div>
 			<div className="text-xxs stack items-start mt-1">
-				{firstPlacer.members.map((member) => (
+				{placer.members.map((member) => (
 					<div key={member.id} className="stack horizontal xs items-center">
-						{member.country ? <Flag tiny countryCode={member.country} /> : null}
-						{member.username}{" "}
+						{!censored && member.country ? (
+							<Flag tiny countryCode={member.country} />
+						) : null}
+						{censored ? "???" : member.username}{" "}
 					</div>
 				))}
-				{firstPlacer.notShownMembersCount > 0 ? (
+				{!censored && placer.notShownMembersCount > 0 ? (
 					<div className="font-bold text-lighter">
-						+{firstPlacer.notShownMembersCount}
+						+{placer.notShownMembersCount}
 					</div>
 				) : null}
 			</div>
+		</>
+	);
+}
+
+function TournamentFirstPlacerTeamNameOnly({
+	placer,
+	censored,
+}: {
+	placer: ShowcaseCalendarEvent["firstPlacers"][number];
+	censored: boolean;
+}) {
+	const { t } = useTranslation(["front"]);
+
+	return (
+		<div className="stack items-start">
+			<span className={styles.firstPlacersTeamName}>
+				{censored ? "???" : placer.teamName}
+			</span>
+			<div className="text-xxxs text-lighter font-bold text-uppercase">
+				{t("front:showcase.card.winner")}
+				{placer.div ? ` (${placer.div})` : null}
+			</div>
 		</div>
+	);
+}
+
+function SpoilerRevealPill({ onReveal }: { onReveal: () => void }) {
+	const { t } = useTranslation(["common"]);
+
+	return (
+		<SendouButton
+			variant="outlined"
+			size="miniscule"
+			onPress={onReveal}
+			icon={<ShieldMinus />}
+		>
+			{t("common:actions.reveal")}
+		</SendouButton>
 	);
 }
 
@@ -193,7 +281,11 @@ function BadgePrizesPill({
 	return (
 		<SendouPopover
 			trigger={
-				<SendouButton variant="minimal" className={styles.badgePill}>
+				<SendouButton
+					variant="minimal"
+					size="miniscule"
+					className={styles.badgePill}
+				>
 					<Image
 						size={16}
 						path={navIconUrl("badges")}

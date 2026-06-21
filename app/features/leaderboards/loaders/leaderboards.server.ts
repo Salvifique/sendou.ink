@@ -1,5 +1,5 @@
 import { cachified } from "@epic-web/cachified";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { getUser } from "~/features/auth/core/user.server";
 import * as LeaderboardRepository from "~/features/leaderboards/LeaderboardRepository.server";
 import * as Seasons from "~/features/mmr/core/Seasons";
@@ -21,20 +21,11 @@ import {
 	TYPE_SEARCH_PARAM_KEY,
 	WEAPON_LEADERBOARD_MAX_SIZE,
 } from "../leaderboards-constants";
-import {
-	allXPLeaderboard,
-	modeXPLeaderboard,
-	weaponXPLeaderboard,
-} from "../queries/XPLeaderboard.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-	const user = await getUser(request);
-	const unvalidatedType = new URL(request.url).searchParams.get(
-		TYPE_SEARCH_PARAM_KEY,
-	);
-	const unvalidatedSeason = new URL(request.url).searchParams.get(
-		SEASON_SEARCH_PARAM_KEY,
-	);
+export const loader = async ({ url }: LoaderFunctionArgs) => {
+	const user = getUser();
+	const unvalidatedType = url.searchParams.get(TYPE_SEARCH_PARAM_KEY);
+	const unvalidatedSeason = url.searchParams.get(SEASON_SEARCH_PARAM_KEY);
 
 	const type =
 		LEADERBOARD_TYPES.find((type) => type === unvalidatedType) ??
@@ -59,6 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 					key: `team-leaderboard-season-${season}-${type}`,
 					cache,
 					ttl: ttl(IN_MILLISECONDS.HALF_HOUR),
+					staleWhileRevalidate: ttl(IN_MILLISECONDS.TWO_HOURS),
 					async getFreshValue() {
 						return LeaderboardRepository.teamLeaderboardBySeason({
 							season,
@@ -79,6 +71,19 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 	const showOwnEntryPeek = fullUserLeaderboard && !isWeaponLeaderboard && user;
 
+	const xpLeaderboard =
+		type === "XP-ALL"
+			? await LeaderboardRepository.allXPLeaderboard()
+			: type.startsWith("XP-MODE")
+				? await LeaderboardRepository.modeXPLeaderboard(
+						type.split("-")[2] as RankedModeShort,
+					)
+				: type.startsWith("XP-WEAPON")
+					? await LeaderboardRepository.weaponXPLeaderboard(
+							Number(type.split("-")[2]) as MainWeaponId,
+						)
+					: null;
+
 	return {
 		userLeaderboard: filteredLeaderboard ?? userLeaderboard,
 		ownEntryPeek: showOwnEntryPeek
@@ -89,14 +94,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 				})
 			: null,
 		teamLeaderboard,
-		xpLeaderboard:
-			type === "XP-ALL"
-				? allXPLeaderboard()
-				: type.startsWith("XP-MODE")
-					? modeXPLeaderboard(type.split("-")[2] as RankedModeShort)
-					: type.startsWith("XP-WEAPON")
-						? weaponXPLeaderboard(Number(type.split("-")[2]) as MainWeaponId)
-						: null,
+		xpLeaderboard,
 		season,
 	};
 };

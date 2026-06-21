@@ -1,116 +1,69 @@
-import cachified from "@epic-web/cachified";
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { getUser } from "~/features/auth/core/user.server";
-import { reportedWeaponsToArrayOfArrays } from "~/features/sendouq-match/core/reported-weapons.server";
-import * as QMatchRepository from "~/features/sendouq-match/QMatchRepository.server";
-import { reportedWeaponsByMatchId } from "~/features/sendouq-match/queries/reportedWeaponsByMatchId.server";
-import { cache } from "~/utils/cache.server";
+import { chatAccessible } from "~/features/chat/chat-utils";
+import * as Seasons from "~/features/mmr/core/Seasons";
+import { SendouQ } from "~/features/sendouq/core/SendouQ.server";
+import * as PrivateUserNoteRepository from "~/features/sendouq/PrivateUserNoteRepository.server";
+import * as ReportedWeaponRepository from "~/features/sendouq-match/ReportedWeaponRepository.server";
+import * as SQMatchRepository from "~/features/sendouq-match/SQMatchRepository.server";
 import { databaseTimestampToDate } from "~/utils/dates";
-import invariant from "~/utils/invariant";
+import type { SerializeFrom } from "~/utils/remix";
 import { notFoundIfFalsy, parseParams } from "~/utils/remix.server";
 import { qMatchPageParamsSchema } from "../q-match-schemas";
 
-export const loader = async ({ params, request }: LoaderFunctionArgs) => {
-	const user = await getUser(request);
+export const loader = async ({ params }: LoaderFunctionArgs) => {
+	const user = getUser();
 	const matchId = parseParams({
 		params,
 		schema: qMatchPageParamsSchema,
 	}).id;
-	const match = notFoundIfFalsy(await QMatchRepository.findById(matchId));
 
-	const [groupAlpha, groupBravo] = await Promise.all([
-		QMatchRepository.findGroupById({
-			groupId: match.alphaGroupId,
-			loggedInUserId: user?.id,
-		}),
-		QMatchRepository.findGroupById({
-			groupId: match.bravoGroupId,
-			loggedInUserId: user?.id,
-		}),
+	const matchUnmapped = notFoundIfFalsy(
+		await SQMatchRepository.findById(matchId),
+	);
+
+	const matchUsers = [
+		...matchUnmapped.groupAlpha.members,
+		...matchUnmapped.groupBravo.members,
+	].map((m) => m.id);
+
+	const isStaff = user?.roles.includes("STAFF") ?? false;
+	const isParticipant = Boolean(user && matchUsers.includes(user.id));
+
+	const [privateNotes, reportedWeapons] = await Promise.all([
+		user ? PrivateUserNoteRepository.ownNotes(matchUsers) : undefined,
+		ReportedWeaponRepository.findByMatchId(matchId),
 	]);
-	invariant(groupAlpha, "Group alpha not found");
-	invariant(groupBravo, "Group bravo not found");
 
-	const isTeamAlphaMember = groupAlpha.members.some((m) => m.id === user?.id);
-	const isTeamBravoMember = groupBravo.members.some((m) => m.id === user?.id);
-	const isMatchInsider =
-		isTeamAlphaMember || isTeamBravoMember || user?.roles.includes("STAFF");
-	const matchHappenedInTheLastMonth =
-		databaseTimestampToDate(match.createdAt).getTime() >
-		Date.now() - 30 * 24 * 3600 * 1000;
-
-	const censoredGroupAlpha = {
-		...groupAlpha,
-		chatCode: undefined,
-		members: groupAlpha.members.map((m) => ({
-			...m,
-			friendCode:
-				isMatchInsider && matchHappenedInTheLastMonth
-					? m.friendCode
-					: undefined,
-		})),
-	};
-	const censoredGroupBravo = {
-		...groupBravo,
-		chatCode: undefined,
-		members: groupBravo.members.map((m) => ({
-			...m,
-			friendCode:
-				isMatchInsider && matchHappenedInTheLastMonth
-					? m.friendCode
-					: undefined,
-		})),
-	};
-	const censoredMatch = { ...match, chatCode: undefined };
-
-	const groupChatCode = () => {
-		if (isTeamAlphaMember) return groupAlpha.chatCode;
-		if (isTeamBravoMember) return groupBravo.chatCode;
-
-		return null;
-	};
-
-	const rawReportedWeapons = match.reportedAt
-		? reportedWeaponsByMatchId(matchId)
-		: null;
-
-	const banScreen = !match.isLocked
-		? await cachified({
-				key: `matches-screen-ban-${match.id}`,
-				cache,
-				async getFreshValue() {
-					const noScreenSettings =
-						await QMatchRepository.groupMembersNoScreenSettings([
-							groupAlpha,
-							groupBravo,
-						]);
-
-					return noScreenSettings.some((user) => user.noScreen);
-				},
-			})
-		: null;
+	const match = SendouQ.mapMatch(matchUnmapped, user, privateNotes);
 
 	return {
-		match: censoredMatch,
-		matchChatCode: isMatchInsider ? match.chatCode : null,
-		canPostChatMessages: isTeamAlphaMember || isTeamBravoMember,
-		groupChatCode: groupChatCode(),
-		groupAlpha: censoredGroupAlpha,
-		groupBravo: censoredGroupBravo,
-		banScreen,
-		groupMemberOf: isTeamAlphaMember
-			? ("ALPHA" as const)
-			: isTeamBravoMember
-				? ("BRAVO" as const)
-				: null,
-		reportedWeapons: match.reportedAt
-			? reportedWeaponsToArrayOfArrays({
-					groupAlpha,
-					groupBravo,
-					mapList: match.mapList,
-					reportedWeapons: rawReportedWeapons,
-				})
-			: null,
-		rawReportedWeapons,
+		match,
+		reportedWeapons,
+		isOffSeason: Seasons.current() === null,
+		chatCode: (() => {
+			if (!(isStaff || isParticipant)) return null;
+
+			const accessible = chatAccessible({
+				isStaff,
+				expiresAfterDays: 1,
+				comparedTo: databaseTimestampToDate(matchUnmapped.createdAt),
+			});
+			if (!accessible) return null;
+
+			if (!isParticipant) return match.chatCode ?? null;
+
+			const codes = [
+				match.chatCode,
+				match.groupAlpha.chatCode,
+				match.groupBravo.chatCode,
+			].filter((c): c is string => Boolean(c));
+
+			if (codes.length === 0) return null;
+			if (codes.length === 1) return codes[0];
+			return codes;
+		})(),
 	};
 };
+
+export type SendouQMatchLoaderData = SerializeFrom<typeof loader>;

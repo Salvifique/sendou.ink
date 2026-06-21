@@ -1,10 +1,17 @@
-import type { MetaFunction } from "@remix-run/node";
-import { Link, useLoaderData, useNavigate } from "@remix-run/react";
 import clsx from "clsx";
+import {
+	Calendar,
+	ChevronLeft,
+	ChevronRight,
+	Eye,
+	EyeOff,
+	Link as LinkIcon,
+} from "lucide-react";
 import type * as React from "react";
 import type { DateValue } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { AddNewButton } from "~/components/AddNewButton";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData, useNavigate } from "react-router";
 import { CopyToClipboardPopover } from "~/components/CopyToClipboardPopover";
 import {
 	SendouButton,
@@ -12,12 +19,8 @@ import {
 } from "~/components/elements/Button";
 import { SendouCalendar } from "~/components/elements/Calendar";
 import { SendouPopover } from "~/components/elements/Popover";
-import { ArrowLeftIcon } from "~/components/icons/ArrowLeft";
-import { ArrowRightIcon } from "~/components/icons/ArrowRight";
-import { CalendarIcon } from "~/components/icons/Calendar";
-import { EyeIcon } from "~/components/icons/Eye";
-import { EyeSlashIcon } from "~/components/icons/EyeSlash";
-import { LinkIcon } from "~/components/icons/Link";
+import { LocaleTime } from "~/components/LocaleTime";
+import { LocaleTimeRange } from "~/components/LocaleTimeRange";
 import { Main } from "~/components/Main";
 import { DAYS_SHOWN_AT_A_TIME } from "~/features/calendar/calendar-constants";
 import { useCollapsableEvents } from "~/features/calendar/calendar-hooks";
@@ -25,12 +28,10 @@ import { dayMonthYearToDateValue } from "~/utils/dates";
 import { metaTags } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
-	CALENDAR_NEW_PAGE,
 	CALENDAR_PAGE,
 	calendarIcalFeed,
 	calendarPage,
 	navIconUrl,
-	TOURNAMENT_NEW_PAGE,
 } from "~/utils/urls";
 import type { DayMonthYear } from "~/utils/zod";
 import { action } from "../actions/calendar";
@@ -39,6 +40,7 @@ import { FiltersDialog } from "../components/FiltersDialog";
 import { TournamentCard } from "../components/TournamentCard";
 import * as CalendarEvent from "../core/CalendarEvent";
 import { type CalendarLoaderData, loader } from "../loaders/calendar.server";
+
 export { action, loader };
 
 import styles from "./calendar.module.css";
@@ -73,14 +75,14 @@ export default function CalendarPage() {
 			<div className={styles.buttonsContainer}>
 				<div className={styles.navigateButtonsContainer}>
 					<NavigateButton
-						icon={<ArrowLeftIcon />}
+						icon={<ChevronLeft />}
 						daysInterval={previous}
 						filters={data.filters}
 					>
 						{t("common:actions.previous")}
 					</NavigateButton>
 					<NavigateButton
-						icon={<ArrowRightIcon />}
+						icon={<ChevronRight />}
 						daysInterval={next}
 						filters={data.filters}
 					>
@@ -105,12 +107,10 @@ export default function CalendarPage() {
 						key={CalendarEvent.filtersToString(data.filters)}
 						filters={data.filters}
 					/>
-					<AddNewButton navIcon="calendar" to={CALENDAR_NEW_PAGE} />
-					<AddNewButton navIcon="medal" to={TOURNAMENT_NEW_PAGE} />
 				</div>
 			</div>
 			<div
-				className={styles.columnsContainer}
+				className={clsx(styles.columnsContainer, "scrollbar")}
 				style={{ "--columns-count": DAYS_SHOWN_AT_A_TIME }}
 			>
 				{shown.map((date) => (
@@ -118,6 +118,7 @@ export default function CalendarPage() {
 						key={`${date.month}-${date.day}`}
 						date={date.day}
 						month={date.month}
+						year={date.year}
 						eventTimes={data.eventTimes.filter((event) => {
 							const eventDate = new Date(event.at);
 
@@ -144,20 +145,10 @@ function NavigateButton({
 	daysInterval: ReturnType<typeof daysForCalendar>["shown"];
 	filters?: CalendarLoaderData["filters"];
 }) {
-	const { i18n } = useTranslation();
 	const lowestDate = daysInterval[0];
 	const highestDate = daysInterval[daysInterval.length - 1];
 
-	const dateToString = (
-		day: ReturnType<typeof daysForCalendar>["shown"][number],
-	) =>
-		new Date(new Date().getFullYear(), day.month, day.day).toLocaleDateString(
-			i18n.language,
-			{
-				day: "numeric",
-				month: "short",
-			},
-		);
+	const year = new Date().getFullYear();
 
 	return (
 		<Link
@@ -168,9 +159,12 @@ function NavigateButton({
 			{icon}
 			<div>
 				<div>{children}</div>
-				<div className="text-xxs text-lighter">
-					{dateToString(lowestDate)} - {dateToString(highestDate)}
-				</div>
+				<LocaleTimeRange
+					from={new Date(year, lowestDate.month, lowestDate.day)}
+					to={new Date(year, highestDate.month, highestDate.day)}
+					options={{ day: "numeric", month: "numeric" }}
+					className={styles.navigateArrowButtonRange}
+				/>
 			</div>
 		</Link>
 	);
@@ -201,10 +195,7 @@ function CalendarDatePicker({
 	return (
 		<SendouPopover
 			trigger={
-				<SendouButton
-					className={styles.navigateButton}
-					icon={<CalendarIcon />}
-				/>
+				<SendouButton className={styles.navigateButton} icon={<Calendar />} />
 			}
 		>
 			<SendouCalendar
@@ -219,17 +210,19 @@ function CalendarDatePicker({
 function DayEventsColumn({
 	date,
 	month,
+	year,
 	eventTimes,
 }: {
 	date: number;
 	month: number;
+	year: number;
 	eventTimes: CalendarLoaderData["eventTimes"];
 }) {
 	const eventTimesCollapsed = useCollapsableEvents(eventTimes);
 
 	return (
 		<div>
-			<DayHeader date={date} month={month} />
+			<DayHeader date={date} month={month} year={year} />
 			<div className={styles.dayEvents}>
 				{eventTimesCollapsed.map((eventTime, i) => {
 					return (
@@ -253,10 +246,8 @@ function DayEventsColumn({
 	);
 }
 
-function DayHeader(props: { date: number; month: number }) {
-	const { i18n } = useTranslation();
-
-	const date = new Date(new Date().getFullYear(), props.month, props.date);
+function DayHeader(props: { date: number; month: number; year: number }) {
+	const date = new Date(props.year, props.month, props.date);
 	const isToday = date.toDateString() === new Date().toDateString();
 
 	return (
@@ -266,14 +257,20 @@ function DayHeader(props: { date: number; month: number }) {
 			})}
 			data-testid={isToday ? "today-header" : undefined}
 		>
-			{date.toLocaleDateString(i18n.language, {
-				day: "numeric",
-				month: "long",
-			})}
+			<LocaleTime
+				date={date}
+				options={{
+					day: "numeric",
+					month: "long",
+				}}
+			/>
 			<div className={styles.dayHeaderWeekday}>
-				{date.toLocaleDateString(i18n.language, {
-					weekday: "long",
-				})}
+				<LocaleTime
+					date={date}
+					options={{
+						weekday: "long",
+					}}
+				/>
 			</div>
 		</div>
 	);
@@ -294,32 +291,38 @@ function ClockHeader({
 	hiddenShown: boolean;
 	className?: string;
 }) {
-	const { i18n } = useTranslation();
-
 	const isInThePast = (toDate ?? date).getTime() < Date.now();
+	const timeOptions: Intl.DateTimeFormatOptions = {
+		hour: "numeric",
+		minute: "numeric",
+	};
 
 	return (
 		<div className={clsx(className, styles.clockHeader)}>
 			<div className="stack horizontal justify-between">
-				<span
-					className={clsx({
-						"text-lighter italic": isInThePast,
-					})}
-				>
-					{date.toLocaleTimeString(i18n.language, {
-						hour: "numeric",
-						minute: "2-digit",
-					})}
-					{toDate
-						? ` - ${toDate.toLocaleTimeString(i18n.language, {
-								hour: "numeric",
-								minute: "2-digit",
-							})}`
-						: ""}
-				</span>
+				{toDate ? (
+					<LocaleTimeRange
+						from={date}
+						to={toDate}
+						options={timeOptions}
+						className={clsx({
+							"text-lighter italic": isInThePast,
+						})}
+						data-testid="clock-header-time"
+					/>
+				) : (
+					<LocaleTime
+						className={clsx({
+							"text-lighter italic": isInThePast,
+						})}
+						date={date}
+						options={timeOptions}
+						data-testid="clock-header-time"
+					/>
+				)}
 				{hiddenEventsCount > 0 ? (
 					<SendouButton
-						icon={hiddenShown ? <EyeIcon /> : <EyeSlashIcon />}
+						icon={hiddenShown ? <Eye /> : <EyeOff />}
 						onPress={onToggleHidden}
 						variant="minimal"
 						className={styles.hiddenEventsButton}

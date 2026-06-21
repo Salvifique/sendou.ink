@@ -1,41 +1,51 @@
 import cachified from "@epic-web/cachified";
-import type { LoaderFunctionArgs } from "@remix-run/node";
 import type { Tables } from "~/db/tables";
-import { getUserId } from "~/features/auth/core/user.server";
+import { getUser } from "~/features/auth/core/user.server";
 import * as Changelog from "~/features/front-page/core/Changelog.server";
 import { cachedFullUserLeaderboard } from "~/features/leaderboards/core/leaderboards.server";
 import * as LeaderboardRepository from "~/features/leaderboards/LeaderboardRepository.server";
+import * as MatchProfileRepository from "~/features/match-profile/MatchProfileRepository.server";
 import * as Seasons from "~/features/mmr/core/Seasons";
+import * as SplatoonRotationRepository from "~/features/splatoon-rotations/SplatoonRotationRepository.server";
 import { cache, IN_MILLISECONDS, ttl } from "~/utils/cache.server";
-import {
-	discordAvatarUrl,
-	teamPage,
-	userPage,
-	userSubmittedImage,
-} from "~/utils/urls";
+import { databaseTimestampNow } from "~/utils/dates";
+import type { SerializeFrom } from "~/utils/remix";
+import { discordAvatarUrl, teamPage, userPage } from "~/utils/urls";
 import * as ShowcaseTournaments from "../core/ShowcaseTournaments.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-	const user = await getUserId(request);
+export type FrontPageLoaderData = SerializeFrom<typeof loader>;
 
-	const [tournaments, changelog, leaderboards] = await Promise.all([
-		ShowcaseTournaments.frontPageTournamentsByUserId(user?.id ?? null),
-		cachified({
-			key: "front-changelog",
-			cache,
-			ttl: ttl(IN_MILLISECONDS.ONE_HOUR),
-			staleWhileRevalidate: ttl(IN_MILLISECONDS.TWO_HOURS),
-			async getFreshValue() {
-				return Changelog.get();
-			},
-		}),
-		cachedLeaderboards(),
-	]);
+export const loader = async () => {
+	const user = getUser();
+
+	const [tournaments, changelog, leaderboards, rotations, weaponPool] =
+		await Promise.all([
+			ShowcaseTournaments.categorizedTournamentsByUserId(null),
+			cachified({
+				key: "front-changelog",
+				cache,
+				ttl: ttl(IN_MILLISECONDS.ONE_HOUR),
+				staleWhileRevalidate: ttl(IN_MILLISECONDS.TWO_HOURS),
+				async getFreshValue() {
+					return Changelog.get();
+				},
+			}),
+			cachedLeaderboards(),
+			SplatoonRotationRepository.findAll(),
+			user
+				? MatchProfileRepository.settingsByUserId(user.id).then(
+						(s) => s.weaponPool ?? null,
+					)
+				: Promise.resolve(null),
+		]);
 
 	return {
 		tournaments,
 		changelog,
 		leaderboards,
+		rotations,
+		weaponPool,
+		now: databaseTimestampNow(),
 	};
 };
 
@@ -73,13 +83,15 @@ function cachedLeaderboards(): Promise<{
 					power: entry.power,
 					name: entry.username,
 					url: userPage(entry),
-					avatarUrl: entry.discordAvatar
-						? discordAvatarUrl({
-								discordAvatar: entry.discordAvatar,
-								discordId: entry.discordId,
-								size: "sm",
-							})
-						: null,
+					avatarUrl: entry.customAvatarUrl
+						? entry.customAvatarUrl
+						: entry.discordAvatar
+							? discordAvatarUrl({
+									discordAvatar: entry.discordAvatar,
+									discordId: entry.discordId,
+									size: "sm",
+								})
+							: null,
 				})),
 				team: team
 					.filter((entry) => entry.team)
@@ -94,9 +106,7 @@ function cachedLeaderboards(): Promise<{
 							power: entry.power,
 							name: team.name,
 							url: teamPage(team.customUrl),
-							avatarUrl: team.avatarUrl
-								? userSubmittedImage(team.avatarUrl)
-								: null,
+							avatarUrl: team.avatarUrl,
 						};
 					}),
 			};

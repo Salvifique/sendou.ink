@@ -1,7 +1,13 @@
-import { expect, test } from "@playwright/test";
-import { impersonate, navigate, seed, selectUser } from "~/utils/playwright";
 import { badgePage } from "~/utils/urls";
 import { NZAP_TEST_ID } from "../app/db/seed/constants";
+import {
+	expect,
+	impersonate,
+	navigate,
+	seed,
+	selectUser,
+	test,
+} from "./helpers/playwright";
 
 test.describe("Badges", () => {
 	test("adds a badge owner sending a notification", async ({ page }) => {

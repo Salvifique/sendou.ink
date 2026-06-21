@@ -1,7 +1,7 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
 import clsx from "clsx";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { useLoaderData } from "react-router";
 import { Ability } from "~/components/Ability";
 import { Main } from "~/components/Main";
 import type { SendouRouteHandle } from "~/utils/remix.server";
@@ -11,9 +11,10 @@ import {
 	outlinedMainWeaponImageUrl,
 	weaponBuildPage,
 } from "~/utils/urls";
-import { metaTags } from "../../../utils/remix";
+import { metaTags, type SerializeFrom } from "../../../utils/remix";
 
 import { loader } from "../loaders/builds.$slug.popular.server";
+
 export { loader };
 
 export const meta: MetaFunction<typeof loader> = (args) => {
@@ -44,11 +45,6 @@ export const handle: SendouRouteHandle = {
 				imgPath: outlinedMainWeaponImageUrl(data.meta.weaponId),
 				href: weaponBuildPage(data.meta.slug),
 				type: "IMAGE",
-			},
-			{
-				href: "/",
-				text: data.meta.breadcrumbText,
-				type: "TEXT",
 			},
 		];
 	},

@@ -1,7 +1,6 @@
-// for testing use the command `npx tsx ./scripts/create-league-divisions.ts 6 'https://gist.githubusercontent.com/sendou-ink/38aa4d5d8426035ce178c09598ae627f/raw/17be9bb53a9f017c2097d0624f365d1c5a029f01/league.csv'`
+// for testing use the command `pnpm exec vite-node ./scripts/create-league-divisions.ts 6 'https://gist.githubusercontent.com/sendou-ink/38aa4d5d8426035ce178c09598ae627f/raw/17be9bb53a9f017c2097d0624f365d1c5a029f01/league.csv'`
 
-import "dotenv/config";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { db } from "~/db/sql";
 import { ADMIN_ID } from "~/features/admin/admin-constants";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
@@ -70,11 +69,10 @@ async function main() {
 			authorId: tournament.ctx.author.id,
 			bracketProgression: tournament.ctx.settings.bracketProgression,
 			description: tournament.ctx.description,
-			deadlines: tournament.ctx.settings.deadlines,
 			discordInviteCode:
 				tournament.ctx.discordUrl?.replace("https://discord.gg/", "") ?? null,
 			mapPickingStyle: tournament.ctx.mapPickingStyle,
-			name: `${tournament.ctx.name} - Division ${div}`,
+			name: `${tournament.ctx.name} - ${div.startsWith("Division") ? div : `Division ${div}`}`,
 			organizationId: tournament.ctx.organization?.id ?? null,
 			rules: tournament.ctx.rules,
 			startTimes: [dateToDatabaseTimestamp(tournament.ctx.startTime)],
@@ -93,6 +91,7 @@ async function main() {
 			autonomousSubs: false,
 			isRanked: tournament.ctx.settings.isRanked,
 			minMembersPerTeam: tournament.ctx.settings.minMembersPerTeam,
+			maxMembersPerTeam: tournament.ctx.settings.maxMembersPerTeam,
 			regClosesAt: tournament.ctx.settings.regClosesAt,
 			requireInGameNames: tournament.ctx.settings.requireInGameNames,
 			bracketUrl: "https://sendou.ink",
@@ -134,9 +133,9 @@ type ParsedTeam = ReturnType<typeof parseCsv>[number];
 
 function parseCsv(csv: string) {
 	const lines = csv.trim().split("\n");
-	const headers = lines[0].split(",");
+	const headers = splitCsvRow(lines[0]).map((h) => h.trim());
 	const rows = lines.slice(1).map((line) => {
-		const row = line.split(",");
+		const row = splitCsvRow(line);
 		return headers.reduce(
 			(acc, header, i) => {
 				acc[header] = row[i];
@@ -177,6 +176,39 @@ function validateDivs(teams: ParsedTeam[]) {
 			`Division ${div} has ${count} teams, expected at least ${MIN_TEAMS_COUNT_PER_DIV}`,
 		);
 	}
+}
+
+function splitCsvRow(line: string) {
+	const fields: string[] = [];
+	let current = "";
+	let inQuotes = false;
+
+	for (let i = 0; i < line.length; i++) {
+		const char = line[i];
+
+		if (inQuotes) {
+			if (char === '"') {
+				if (line[i + 1] === '"') {
+					current += '"';
+					i++;
+				} else {
+					inQuotes = false;
+				}
+			} else {
+				current += char;
+			}
+		} else if (char === '"') {
+			inQuotes = true;
+		} else if (char === ",") {
+			fields.push(current);
+			current = "";
+		} else {
+			current += char;
+		}
+	}
+
+	fields.push(current);
+	return fields;
 }
 
 main();

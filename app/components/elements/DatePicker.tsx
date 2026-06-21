@@ -1,4 +1,4 @@
-import clsx from "clsx";
+import { Calendar } from "lucide-react";
 import {
 	Button,
 	DateInput,
@@ -12,11 +12,8 @@ import {
 } from "react-aria-components";
 import { SendouBottomTexts } from "~/components/elements/BottomTexts";
 import { SendouCalendar } from "~/components/elements/Calendar";
-import {
-	type FormFieldSize,
-	formFieldSizeToClassName,
-} from "../form/form-utils";
-import { CalendarIcon } from "../icons/Calendar";
+import { useHydrated } from "~/hooks/useHydrated";
+import styles from "./DatePicker.module.css";
 import { SendouLabel } from "./Label";
 
 interface SendouDatePickerProps<T extends DateValue>
@@ -24,29 +21,55 @@ interface SendouDatePickerProps<T extends DateValue>
 	label: string;
 	bottomText?: string;
 	errorText?: string;
-	size?: FormFieldSize;
+	errorId?: string;
 }
 
 export function SendouDatePicker<T extends DateValue>({
 	label,
 	errorText,
+	errorId,
 	bottomText,
-	size,
 	isRequired,
 	...rest
 }: SendouDatePickerProps<T>) {
+	const isHydrated = useHydrated();
+
+	if (!isHydrated) {
+		return (
+			<div>
+				<SendouLabel required={isRequired}>{label}</SendouLabel>
+				<input type="text" disabled />
+				<SendouBottomTexts
+					bottomText={bottomText}
+					errorText={errorText}
+					errorId={errorId}
+				/>
+			</div>
+		);
+	}
+
 	return (
-		<ReactAriaDatePicker {...rest} validationBehavior="aria">
+		<ReactAriaDatePicker
+			{...rest}
+			validationBehavior="aria"
+			className={styles.root}
+		>
 			<SendouLabel required={isRequired}>{label}</SendouLabel>
-			<Group
-				className={clsx("react-aria-Group", formFieldSizeToClassName(size))}
-			>
-				<DateInput>{(segment) => <DateSegment segment={segment} />}</DateInput>
-				<Button data-testid="open-calendar-button">
-					<CalendarIcon />
+			<Group className={styles.group}>
+				<DateInput className={styles.dateInput}>
+					{(segment) => (
+						<DateSegment segment={segment} className={styles.segment} />
+					)}
+				</DateInput>
+				<Button data-testid="open-calendar-button" className={styles.button}>
+					<Calendar className={styles.icon} />
 				</Button>
 			</Group>
-			<SendouBottomTexts bottomText={bottomText} errorText={errorText} />
+			<SendouBottomTexts
+				bottomText={bottomText}
+				errorText={errorText}
+				errorId={errorId}
+			/>
 			<Popover>
 				<Dialog>
 					<SendouCalendar />

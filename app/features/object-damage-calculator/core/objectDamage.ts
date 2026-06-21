@@ -3,9 +3,9 @@ import type {
 	AbilityPoints,
 	AnalyzedBuild,
 	AnyWeapon,
+	Damage,
 	DamageType,
-} from "~/features/build-analyzer";
-import type { Damage } from "~/features/build-analyzer/analyzer-types";
+} from "~/features/build-analyzer/analyzer-types";
 import type {
 	MainWeaponId,
 	SpecialWeaponId,
@@ -20,10 +20,10 @@ import {
 	damageTypesToCombine,
 } from "../calculator-constants";
 import type { CombineWith, DamageReceiver } from "../calculator-types";
-import objectDamages from "./object-dmg.json";
+import objectDamages from "../data/object-dmg.json";
 import { objectHitPoints } from "./objectHitPoints";
 
-export function damageTypeToMultipliers({
+function damageTypeToMultipliers({
 	type,
 	weapon,
 }: {
@@ -86,8 +86,7 @@ function resolveRelevantKey({
 		if (!weaponIds.includes(normalizedWeaponId)) continue;
 		if (damageType !== type) continue;
 
-		// @ts-expect-error TODO: fix this (5.5 version)
-		if (!actualKeys.includes(key)) {
+		if (!actualKeys.includes(key as Exclude<typeof key, "Default">)) {
 			throw new Error(
 				`Invalid damagePriorities (no key in object-dmg.json for the weapon): ${JSON.stringify(
 					[weaponType, weaponIds, damageType, key],
@@ -105,7 +104,7 @@ function resolveRelevantKey({
 	);
 }
 
-export function multipliersToRecordWithFallbacks(
+function multipliersToRecordWithFallbacks(
 	multipliers: ReturnType<typeof damageTypeToMultipliers>,
 ) {
 	return Object.fromEntries(
@@ -130,7 +129,9 @@ export function resolveAllUniqueDamageTypes({
 				? analyzed.stats.specialWeaponDamages.map((d) => d.type)
 				: analyzed.stats.damages.map((d) => d.type);
 
-	return R.unique(damageTypes).filter((dmg) => !dmg.includes("SECONDARY"));
+	return R.unique(damageTypes).filter(
+		(dmg) => !dmg.includes("SECONDARY") && dmg !== "COMBO",
+	);
 }
 
 function resolveFilteredDamages({
@@ -206,7 +207,7 @@ export function calculateDamage({
 }) {
 	const toCombine =
 		anyWeapon.type === "MAIN"
-			? (damageTypesToCombine[anyWeapon.id] ?? []).find(
+			? (damageTypesToCombine[weaponIdToBaseWeaponId(anyWeapon.id)] ?? []).find(
 					(c) => c.when === damageType,
 				)
 			: undefined;
@@ -253,7 +254,8 @@ export function calculateDamage({
 					const otherDamage = () => {
 						//[Special Case] Booyah ignores Tri-Stringer's otherDamage at full charge. In-game bug
 						if (
-							[7010, 7011].includes(anyWeapon.id) &&
+							anyWeapon.type === "MAIN" &&
+							weaponIdToBaseWeaponId(anyWeapon.id) === 7010 &&
 							receiver === "NiceBall_Armor"
 						) {
 							return 0;

@@ -1,28 +1,23 @@
-import { Link, useFetcher } from "@remix-run/react";
 import clsx from "clsx";
-import { formatDistanceToNow } from "date-fns";
+import { SquarePen, Trash } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { Link, useFetcher } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { Divider } from "~/components/Divider";
 import { SendouButton } from "~/components/elements/Button";
 import { Flag } from "~/components/Flag";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
 import { Image, TierImage, WeaponImage } from "~/components/Image";
-import { EditIcon } from "~/components/icons/Edit";
-import { TrashIcon } from "~/components/icons/Trash";
+import { LocaleTime } from "~/components/LocaleTime";
 import { useUser } from "~/features/auth/core/user";
 import * as Seasons from "~/features/mmr/core/Seasons";
 import type { TieredSkill } from "~/features/mmr/tiered.server";
-import { useIsMounted } from "~/hooks/useIsMounted";
+import { useFormatDistanceToNow } from "~/hooks/intl/useFormatDistanceToNow";
+import { useHydrated } from "~/hooks/useHydrated";
 import { useHasRole } from "~/modules/permissions/hooks";
 import { databaseTimestampToDate } from "~/utils/dates";
-import {
-	lfgNewPostPage,
-	navIconUrl,
-	userPage,
-	userSubmittedImage,
-} from "~/utils/urls";
+import { lfgNewPostPage, navIconUrl, userPage } from "~/utils/urls";
 import { hourDifferenceBetweenTimezones } from "../core/timezone";
 import type { LFGLoaderData, TiersMap } from "../routes/lfg";
 
@@ -61,7 +56,7 @@ function UserLFGPost({ post, tiersMap }: { post: Post; tiersMap: TiersMap }) {
 				/>
 				<PostTime createdAt={post.createdAt} updatedAt={post.updatedAt} />
 				<PostPills
-					languages={post.author.languages}
+					languages={post.languages}
 					plusTier={post.author.plusTier}
 					timezone={post.timezone}
 					tiers={
@@ -74,7 +69,7 @@ function UserLFGPost({ post, tiersMap }: { post: Post; tiersMap: TiersMap }) {
 				/>
 			</div>
 			<div>
-				<div className="stack horizontal justify-between">
+				<div className="stack horizontal justify-between items-center">
 					<PostTextTypeHeader type={post.type} />
 					{post.author.id === user?.id || isAdmin ? (
 						<PostDeleteButton id={post.id} type={post.type} />
@@ -98,7 +93,7 @@ function TeamLFGPost({
 	post: Post & { team: NonNullable<Post["team"]> };
 	tiersMap: TiersMap;
 }) {
-	const isMounted = useIsMounted();
+	const isHydrated = useHydrated();
 	const user = useUser();
 	const isAdmin = useHasRole("ADMIN");
 	const [isExpanded, setIsExpanded] = React.useState(false);
@@ -109,10 +104,15 @@ function TeamLFGPost({
 				<div className="stack xs">
 					<div className="stack horizontal items-center justify-between">
 						<PostTeamLogoHeader team={post.team} />
-						{isMounted && <PostTimezonePill timezone={post.timezone} />}
+						<div className="stack horizontal items-center sm">
+							{isHydrated && <PostTimezonePill timezone={post.timezone} />}
+							{post.languages && (
+								<PostLanguagePill languages={post.languages} />
+							)}
+						</div>
 					</div>
 					<Divider />
-					<div className="stack horizontal justify-between">
+					<div className="stack horizontal justify-between items-center">
 						<PostTime createdAt={post.createdAt} updatedAt={post.updatedAt} />
 						{post.author.id === user?.id ? (
 							<PostEditButton id={post.id} />
@@ -149,9 +149,7 @@ function TeamLFGPost({
 function PostTeamLogoHeader({ team }: { team: NonNullable<Post["team"]> }) {
 	return (
 		<div className="stack horizontal sm items-center font-bold">
-			{team.avatarUrl ? (
-				<Avatar size="xs" url={userSubmittedImage(team.avatarUrl)} />
-			) : null}
+			{team.avatarUrl ? <Avatar size="xs" url={team.avatarUrl} /> : null}
 			{team.name}
 		</div>
 	);
@@ -188,7 +186,6 @@ function PostTeamMembersFull({
 				<div key={member.id} className="stack sm">
 					<PostUserHeader author={member} includeWeapons />
 					<PostPills
-						languages={member.languages}
 						plusTier={member.plusTier}
 						tiers={tiersMap.get(member.id)}
 						postId={postId}
@@ -244,13 +241,8 @@ function PostUserHeader({
 			</div>
 			{includeWeapons ? (
 				<div className="stack horizontal sm">
-					{author.weaponPool.map(({ weaponSplId, isFavorite }) => (
-						<WeaponImage
-							key={weaponSplId}
-							weaponSplId={weaponSplId}
-							size={32}
-							variant={isFavorite ? "badge-5-star" : "badge"}
-						/>
+					{author.weaponPool.map((weapon) => (
+						<WeaponImage key={weapon.weaponSplId} weapon={weapon} size={32} />
 					))}
 				</div>
 			) : null}
@@ -265,7 +257,8 @@ function PostTime({
 	createdAt: number;
 	updatedAt: number;
 }) {
-	const { t, i18n } = useTranslation(["lfg"]);
+	const { t } = useTranslation(["lfg"]);
+	const formatDistanceToNow = useFormatDistanceToNow();
 
 	const createdAtDate = databaseTimestampToDate(createdAt);
 	const updatedAtDate = databaseTimestampToDate(updatedAt);
@@ -274,10 +267,13 @@ function PostTime({
 
 	return (
 		<div className="text-lighter text-xs font-bold">
-			{createdAtDate.toLocaleString(i18n.language, {
-				month: "long",
-				day: "numeric",
-			})}{" "}
+			<LocaleTime
+				date={createdAtDate}
+				options={{
+					month: "numeric",
+					day: "numeric",
+				}}
+			/>{" "}
 			{overDayDifferenceBetween ? (
 				<div className="text-xxs">
 					<i>
@@ -308,18 +304,18 @@ function PostPills({
 	canEdit?: boolean;
 	postId: number;
 }) {
-	const isMounted = useIsMounted();
+	const isHydrated = useHydrated();
 
 	return (
 		<div
 			className={clsx("stack sm xs-row horizontal flex-wrap", {
-				invisible: !isMounted,
+				invisible: !isHydrated,
 			})}
 		>
-			{typeof timezone === "string" && isMounted && (
+			{typeof timezone === "string" && isHydrated && (
 				<PostTimezonePill timezone={timezone} />
 			)}
-			{!isMounted && <PostTimezonePillPlaceholder />}
+			{!isHydrated && <PostTimezonePillPlaceholder />}
 			{typeof plusTier === "number" && (
 				<PostPlusServerPill plusTier={plusTier} />
 			)}
@@ -444,7 +440,7 @@ function PostEditButton({ id }: { id: number }) {
 
 	return (
 		<Link className={styles.editButton} to={lfgNewPostPage(id)}>
-			<EditIcon />
+			<SquarePen />
 			{t("common:actions.edit")}
 		</Link>
 	);
@@ -468,7 +464,7 @@ function PostDeleteButton({ id, type }: { id: number; type: Post["type"] }) {
 				variant="minimal-destructive"
 				size="small"
 				type="submit"
-				icon={<TrashIcon className="small-icon" />}
+				icon={<Trash />}
 			>
 				{t("common:actions.delete")}
 			</SendouButton>

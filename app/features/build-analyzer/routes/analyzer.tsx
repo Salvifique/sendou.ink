@@ -1,12 +1,14 @@
-import type { MetaFunction } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { Link } from "@remix-run/react";
 import clsx from "clsx";
+import { FlaskConical, SlidersHorizontal } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction, ShouldRevalidateFunction } from "react-router";
+import { Link } from "react-router";
+import * as R from "remeda";
 import { AbilitiesSelector } from "~/components/AbilitiesSelector";
 import { Ability } from "~/components/Ability";
 import Chart from "~/components/Chart";
+import { SendouSwitch } from "~/components/elements/Switch";
 import {
 	SendouTab,
 	SendouTabList,
@@ -14,11 +16,13 @@ import {
 	SendouTabs,
 } from "~/components/elements/Tabs";
 import { Image } from "~/components/Image";
-import { BeakerIcon } from "~/components/icons/Beaker";
+import { weaponToSelectedWeapon } from "~/components/layout/WeaponSearch";
 import { Main } from "~/components/Main";
+import { Placeholder } from "~/components/Placeholder";
 import { Table } from "~/components/Table";
+import { WeaponSelect } from "~/components/WeaponSelect";
 import { useUser } from "~/features/auth/core/user";
-import { useIsMounted } from "~/hooks/useIsMounted";
+import { useHydrated } from "~/hooks/useHydrated";
 import { abilitiesShort } from "~/modules/in-game-lists/abilities";
 import type {
 	Ability as AbilityType,
@@ -37,8 +41,9 @@ import {
 	TORPEDO_ID,
 	TOXIC_MIST_ID,
 } from "~/modules/in-game-lists/weapon-ids";
-import { atOrError, nullFilledArray } from "~/utils/arrays";
+import { nullFilledArray } from "~/utils/arrays";
 import invariant from "~/utils/invariant";
+import { logger } from "~/utils/logger";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
 	ANALYZER_URL,
@@ -48,8 +53,9 @@ import {
 	specialWeaponImageUrl,
 	subWeaponImageUrl,
 	userNewBuildPage,
+	weaponParamsPage,
 } from "~/utils/urls";
-import { SendouButton } from "../../../components/elements/Button";
+import { LinkButton, SendouButton } from "../../../components/elements/Button";
 import { SendouPopover } from "../../../components/elements/Popover";
 import { metaTags } from "../../../utils/remix";
 import {
@@ -83,17 +89,13 @@ import {
 	isMainOnlyAbility,
 	isStackableAbility,
 } from "../core/utils";
-import "../analyzer.css";
-import * as R from "remeda";
-import { SendouSwitch } from "~/components/elements/Switch";
-import { WeaponSelect } from "~/components/WeaponSelect";
-import { logger } from "~/utils/logger";
+import styles from "./analyzer.module.css";
 
-export const CURRENT_PATCH = "10.0";
+export const CURRENT_PATCH = "11.2";
 
 export const meta: MetaFunction = (args) => {
 	return metaTags({
-		title: "Build analyzer",
+		title: "Build Analyzer",
 		ogTitle: "Splatoon 3 build analyzer/simulator",
 		location: args.location,
 		description:
@@ -114,10 +116,10 @@ export const handle: SendouRouteHandle = {
 export const shouldRevalidate: ShouldRevalidateFunction = () => false;
 
 export default function BuildAnalyzerShell() {
-	const isMounted = useIsMounted();
+	const isHydrated = useHydrated();
 
-	if (!isMounted) {
-		return null;
+	if (!isHydrated) {
+		return <Placeholder />;
 	}
 
 	return <BuildAnalyzerPage />;
@@ -150,11 +152,13 @@ function BuildAnalyzerPage() {
 	};
 
 	const objectShredderSelected = build[2][0] === "OS" || build2[2][0] === "OS";
+	const stealthJumpSelected = build[2][0] === "SJ" || build2[2][0] === "SJ";
 
 	const context = {
 		isComparing: !buildIsEmpty(build) && !buildIsEmpty(build2),
 		mainWeaponId,
 		abilityPoints,
+		abilityPoints2,
 	};
 
 	const mainWeaponCategoryItems = [
@@ -243,13 +247,13 @@ function BuildAnalyzerPage() {
 
 	return (
 		<Main>
-			<div className="analyzer__container">
-				<div className="analyzer__left-column">
-					<div className="stack sm items-center w-full">
+			<div className={styles.container}>
+				<div className={styles.leftColumn}>
+					<div className="stack sm items-start w-full">
 						<div className="w-full">
 							<WeaponSelect
 								label={t("analyzer:weaponSelect.label")}
-								initialValue={mainWeaponId}
+								value={mainWeaponId}
 								onChange={(val) =>
 									handleChange({
 										newMainWeaponId: val,
@@ -257,6 +261,16 @@ function BuildAnalyzerPage() {
 								}
 							/>
 						</div>
+						<LinkButton
+							to={weaponParamsPage(
+								weaponToSelectedWeapon(mainWeaponId, t).paramsSlug,
+							)}
+							variant="minimal"
+							size="small"
+							icon={<SlidersHorizontal />}
+						>
+							{t("analyzer:rawParameters")}
+						</LinkButton>
 					</div>
 					<div className="stack md items-center w-full">
 						<div className="w-full">
@@ -271,9 +285,9 @@ function BuildAnalyzerPage() {
 										handleChange({ newFocused: 3 });
 									}
 								}}
-								className="analyzer__sub-nav"
+								className={styles.subNav}
 							>
-								<SendouTabList>
+								<SendouTabList fullWidth>
 									<SendouTab id="build-1" data-testid="build1-tab">
 										{t("analyzer:build1")}
 									</SendouTab>
@@ -358,7 +372,7 @@ function BuildAnalyzerPage() {
 							<AbilityChunksRequired build={build} />
 						)}
 					</div>
-					<div className="analyzer__patch">
+					<div className={styles.patch}>
 						{t("analyzer:patch")} {CURRENT_PATCH}
 					</div>
 				</div>
@@ -367,14 +381,14 @@ function BuildAnalyzerPage() {
 						<StatCategory
 							title={t("analyzer:stat.category.main")}
 							summaryRightContent={
-								<div className="analyzer__weapon-info-badge">
+								<div className={styles.weaponInfoBadge}>
 									<Image
 										path={mainWeaponImageUrl(mainWeaponId)}
 										width={20}
 										height={20}
 										alt={t(`weapons:MAIN_${mainWeaponId}`)}
 									/>
-									<span className="analyzer__weapon-info-badge__text">
+									<span className={styles.weaponInfoBadgeText}>
 										{t(`weapons:MAIN_${mainWeaponId}`)}
 									</span>
 								</div>
@@ -387,7 +401,7 @@ function BuildAnalyzerPage() {
 					<StatCategory
 						title={t("analyzer:stat.category.sub")}
 						summaryRightContent={
-							<div className="analyzer__weapon-info-badge">
+							<div className={styles.weaponInfoBadge}>
 								<Image
 									path={subWeaponImageUrl(analyzed.weapon.subWeaponSplId)}
 									width={20}
@@ -476,7 +490,7 @@ function BuildAnalyzerPage() {
 					<StatCategory
 						title={t("analyzer:stat.category.special")}
 						summaryRightContent={
-							<div className="analyzer__weapon-info-badge">
+							<div className={styles.weaponInfoBadge}>
 								<Image
 									path={specialWeaponImageUrl(
 										analyzed.weapon.specialWeaponSplId,
@@ -741,13 +755,13 @@ function BuildAnalyzerPage() {
 					{analyzed.stats.subWeaponDefenseDamages.length > 0 && (
 						<StatCategory
 							title={t("analyzer:stat.category.subWeaponDefenseDamages")}
-							containerClassName="analyzer__table-container"
+							containerClassName={styles.tableContainer}
 							textBelow={t("analyzer:damageSubDefExplanation")}
 						>
 							{(["SRU"] as const).some(
 								(ability) => (abilityPoints.get(ability) ?? 0) > 0,
 							) ? (
-								<div className="analyzer__stat-card-highlighted" />
+								<div className={styles.statCardHighlighted} />
 							) : null}
 							<DamageTable
 								showPopovers
@@ -770,7 +784,7 @@ function BuildAnalyzerPage() {
 					{analyzed.stats.damages.length > 0 && (
 						<StatCategory
 							title={t("analyzer:stat.category.damage")}
-							containerClassName="analyzer__table-container"
+							containerClassName={styles.tableContainer}
 						>
 							<DamageTable
 								values={analyzed.stats.damages}
@@ -786,7 +800,7 @@ function BuildAnalyzerPage() {
 									`weapons:SPECIAL_${analyzed.weapon.specialWeaponSplId}`,
 								),
 							})}
-							containerClassName="analyzer__table-container"
+							containerClassName={styles.tableContainer}
 						>
 							<DamageTable values={analyzed.stats.specialWeaponDamages} />
 						</StatCategory>
@@ -795,12 +809,12 @@ function BuildAnalyzerPage() {
 					{analyzed.stats.fullInkTankOptions.length > 0 && (
 						<StatCategory
 							title={t("analyzer:stat.category.actionsPerInkTank")}
-							containerClassName="analyzer__table-container"
+							containerClassName={styles.tableContainer}
 						>
 							{(["ISM", "ISS"] as const).some(
 								(ability) => (abilityPoints.get(ability) ?? 0) > 0,
 							) ? (
-								<div className="analyzer__stat-card-highlighted" />
+								<div className={styles.statCardHighlighted} />
 							) : null}
 							<ConsumptionTable
 								isComparing={context.isComparing}
@@ -933,11 +947,16 @@ function BuildAnalyzerPage() {
 							stat={statKeyToTuple("superJumpTimeTotal")}
 							title={t("analyzer:stat.superJumpTimeTotal")}
 							suffix={t("analyzer:suffix.seconds")}
+							popoverInfo={
+								stealthJumpSelected
+									? t("analyzer:stat.superJumpTimeTotal.stealthJumpExplanation")
+									: undefined
+							}
 						/>
 					</StatCategory>
 					{objectShredderSelected && (
 						<Link
-							className="analyzer__noticeable-link"
+							className={styles.noticeableLink}
 							to={objectDamageCalculatorPage(mainWeaponId)}
 						>
 							<Image
@@ -951,7 +970,7 @@ function BuildAnalyzerPage() {
 					)}
 					{user && focusedBuild && !buildIsEmpty(focusedBuild) ? (
 						<Link
-							className="analyzer__noticeable-link"
+							className={styles.noticeableLink}
 							to={userNewBuildPage(user, {
 								weapon: mainWeaponId,
 								build: focusedBuild,
@@ -981,25 +1000,20 @@ interface StatChartProps {
 	valueSuffix?: string;
 	mainWeaponId: MainWeaponId;
 	simple?: boolean;
+	/** Marks where the current build(s) sit on the curve: `x` ability points, `y` stat value. */
+	highlight?: Array<{ x: number; y: number }>;
 }
 
 function StatChartPopover(props: StatChartProps) {
-	const { t } = useTranslation(["analyzer"]);
-
 	return (
 		<SendouPopover
-			popoverClassName="analyzer__stat-popover"
+			popoverClassName={styles.statPopover}
 			trigger={
 				<SendouButton
-					className={
-						props.simple ? undefined : "analyzer__stat-popover-trigger"
-					}
-					icon={
-						<BeakerIcon
-							className="analyzer__stat-popover-trigger__icon"
-							title={t("analyzer:button.showChart")}
-						/>
-					}
+					shape="circle"
+					variant="minimal"
+					size={props.simple ? "miniscule" : "small"}
+					icon={<FlaskConical />}
 				/>
 			}
 		>
@@ -1015,6 +1029,7 @@ function StatChart({
 	valueSuffix,
 	mainWeaponId,
 	subWeaponId,
+	highlight,
 }: StatChartProps) {
 	const { t } = useTranslation(["analyzer"]);
 
@@ -1047,9 +1062,13 @@ function StatChart({
 	return (
 		<Chart
 			options={chartOptions as any}
+			containerClassName={styles.statChartContainer}
 			headerSuffix={t("analyzer:abilityPoints.short")}
 			valueSuffix={valueSuffix}
 			xAxis="linear"
+			xAbilityLimit={57}
+			highlight={highlight}
+			crosshair
 		/>
 	);
 }
@@ -1188,16 +1207,16 @@ function APCompare({
 		buildMains.length > 0 || build2Mains.length > 0;
 
 	return (
-		<div className="analyzer__ap-compare">
+		<div className={styles.apCompare}>
 			{hasAtLeastOneMainOnlyAbility ? (
 				<>
-					<div className="analyzer__ap-compare__mains">
+					<div className={styles.apCompareMains}>
 						{buildMains.map((ability) => (
 							<Ability key={ability} ability={ability} size="TINY" />
 						))}
 					</div>
 					<div />
-					<div className="analyzer__ap-compare__mains">
+					<div className={styles.apCompareMains}>
 						{build2Mains.map((ability) => (
 							<Ability key={ability} ability={ability} size="TINY" />
 						))}
@@ -1222,16 +1241,16 @@ function APCompare({
 							{t("analyzer:abilityPoints.short")}
 						</div>
 						<div
-							className={clsx("analyzer__ap-compare__bar", "justify-self-end", {
-								analyzer__better: ap >= ap2,
-							})}
+							className={clsx(
+								styles.apCompareBar,
+								"justify-self-end",
+								ap >= ap2 && styles.better,
+							)}
 							style={{ width: `${ap}px` }}
 						/>
 						<Ability ability={ability} size="TINY" />
 						<div
-							className={clsx("analyzer__ap-compare__bar", {
-								analyzer__better: ap <= ap2,
-							})}
+							className={clsx(styles.apCompareBar, ap <= ap2 && styles.better)}
 							style={{ width: `${ap2}px` }}
 						/>
 						<div
@@ -1275,13 +1294,15 @@ function EffectsSelector({
 	).reverse(); // reverse to show Tacticooler first as it always shows
 
 	return (
-		<div className="analyzer__effects-selector">
+		<div className={styles.effectsSelector}>
 			{effectsToShow.map((effect) => {
 				return (
 					<React.Fragment key={effect.type}>
 						<div>
 							{isAbility(effect.type) ? (
 								<Ability ability={effect.type} size="SUB" />
+							) : effect.type === "AURA" ? (
+								<span className="text-xs font-bold">AURA</span>
 							) : (
 								<Image
 									path={specialWeaponImageUrl(15)}
@@ -1298,7 +1319,7 @@ function EffectsSelector({
 									onChange={(e) =>
 										handleLdeIntensityChange(Number(e.target.value))
 									}
-									className="analyzer__lde-intensity-select"
+									className={styles.ldeIntensitySelect}
 								>
 									{new Array(MAX_LDE_INTENSITY + 1).fill(null).map((_, i) => {
 										const percentage = ((i / MAX_LDE_INTENSITY) * 100)
@@ -1321,7 +1342,6 @@ function EffectsSelector({
 											? handleAddEffect(effect.type)
 											: handleRemoveEffect(effect.type)
 									}
-									size="small"
 								/>
 							)}
 						</div>
@@ -1342,7 +1362,7 @@ function AbilityChunksRequired({
 
 	return (
 		<details className="w-full">
-			<summary className="analyzer__ap-summary">{t("abilityChunks")}</summary>
+			<summary className={styles.apSummary}>{t("abilityChunks")}</summary>
 			<div className="stack sm horizontal flex-wrap mt-4">
 				{abilityChunksMapAsArray.map((a) => {
 					const mainAbilityName = a[0];
@@ -1354,7 +1374,7 @@ function AbilityChunksRequired({
 							className="stack items-center"
 						>
 							<Ability ability={mainAbilityName} size="TINY" />
-							<div className="analyzer__ap-text">{numChunksRequired}</div>
+							<div className={styles.apText}>{numChunksRequired}</div>
 						</div>
 					);
 				})}
@@ -1366,7 +1386,7 @@ function AbilityChunksRequired({
 function StatCategory({
 	title,
 	children,
-	containerClassName = "analyzer__stat-collection",
+	containerClassName = styles.statCollection,
 	textBelow,
 	summaryRightContent,
 	testId,
@@ -1379,14 +1399,14 @@ function StatCategory({
 	testId?: string;
 }) {
 	return (
-		<details className="analyzer__details">
-			<summary className="analyzer__summary" data-testid={testId}>
+		<details className={styles.details}>
+			<summary className={styles.summary} data-testid={testId}>
 				{title}
 				{summaryRightContent}
 			</summary>
 			<div className={containerClassName}>{children}</div>
 			{textBelow && (
-				<div className="analyzer__stat-category-explanation">{textBelow}</div>
+				<div className={styles.statCategoryExplanation}>{textBelow}</div>
 			)}
 		</details>
 	);
@@ -1399,7 +1419,7 @@ function StatCard({
 	suffix,
 	popoverInfo,
 	testId,
-	context: { mainWeaponId, abilityPoints, isComparing },
+	context: { mainWeaponId, abilityPoints, abilityPoints2, isComparing },
 }: {
 	title: string;
 	stat: StatTuple | StatTuple<string> | number | string;
@@ -1409,6 +1429,7 @@ function StatCard({
 	context: {
 		mainWeaponId: MainWeaponId;
 		abilityPoints: AbilityPoints;
+		abilityPoints2: AbilityPoints;
 		isComparing: boolean;
 	};
 }) {
@@ -1449,20 +1470,43 @@ function StatCard({
 		return isStaticValue ? [] : [stat[0].modifiedBy].flat();
 	}, [memoKey]);
 
+	const stackableAbility = modifiedBy.find(isStackableAbility);
+	const highlight = (() => {
+		if (isStaticValue || !stackableAbility || !showBuildValue())
+			return undefined;
+
+		const builds = [
+			[abilityPoints, stat[0].value],
+			...(isComparing ? ([[abilityPoints2, stat[1].value]] as const) : []),
+		] as const;
+
+		const points: Array<{ x: number; y: number }> = [];
+		for (const [ap, value] of builds) {
+			if (typeof value !== "number") continue;
+			points.push({
+				x: Math.min(ap.get(stackableAbility) ?? 0, MAX_AP),
+				y: value,
+			});
+		}
+
+		return points.length > 0 ? points : undefined;
+	})();
+
 	return (
 		<div
-			className={clsx("analyzer__stat-card", {
-				"analyzer__stat-card-highlighted": isHighlighted(),
-			})}
+			className={clsx(
+				styles.statCard,
+				isHighlighted() && styles.statCardHighlighted,
+			)}
 			data-testid={testId}
 		>
-			<div className="analyzer__stat-card__title-and-value-container">
-				<h3 className="analyzer__stat-card__title">
+			<div className={styles.statCardTitleAndValueContainer}>
+				<h2 className={styles.statCardTitle}>
 					{title}{" "}
 					{popoverInfo && (
 						<SendouPopover
 							trigger={
-								<SendouButton className="analyzer__stat-card__popover-trigger">
+								<SendouButton className={styles.statCardPopoverTrigger}>
 									?
 								</SendouButton>
 							}
@@ -1470,10 +1514,10 @@ function StatCard({
 							{popoverInfo}
 						</SendouPopover>
 					)}
-				</h3>
-				<div className="analyzer__stat-card-values">
-					<div className="analyzer__stat-card__value">
-						<h4 className="analyzer__stat-card__value__title">
+				</h2>
+				<div className={styles.statCardValues}>
+					<div className={styles.statCardValue}>
+						<h4 className={styles.statCardValueTitle}>
 							{typeof stat === "number"
 								? t("value")
 								: showComparison
@@ -1481,7 +1525,7 @@ function StatCard({
 									: t("base")}
 						</h4>{" "}
 						<div
-							className="analyzer__stat-card__value__number"
+							className={styles.statCardValueNumber}
 							data-testid={testId ? `${testId}-base` : undefined}
 						>
 							{showComparison ? (stat as StatTuple)[0].value : baseValue}
@@ -1489,14 +1533,14 @@ function StatCard({
 						</div>
 					</div>
 					{showBuildValue() ? (
-						<div className="analyzer__stat-card__value">
+						<div className={styles.statCardValue}>
 							<h4
-								className="analyzer__stat-card__value__title"
+								className={styles.statCardValueTitle}
 								data-testid={testId ? `${testId}-build-title` : undefined}
 							>
 								{showComparison ? t("build2") : t("build")}
 							</h4>{" "}
-							<div className="analyzer__stat-card__value__number">
+							<div className={styles.statCardValueNumber}>
 								{(stat as StatTuple)[showComparison ? 1 : 0].value}
 								{suffix}
 							</div>
@@ -1505,7 +1549,7 @@ function StatCard({
 				</div>
 			</div>
 			{/* always render this so it reserves space */}
-			<div className="analyzer__stat-card__ability-container">
+			<div className={styles.statCardAbilityContainer}>
 				{!isStaticValue && (
 					<>
 						<ModifiedByAbilities abilities={stat[0].modifiedBy} />
@@ -1515,6 +1559,7 @@ function StatCard({
 							title={title}
 							valueSuffix={suffix}
 							mainWeaponId={mainWeaponId}
+							highlight={highlight}
 						/>
 					</>
 				)}
@@ -1554,7 +1599,9 @@ function DamageTable({
 
 	const showDistanceColumn = values.some((val) => val.distance);
 
-	const firstRow = atOrError(values, 0);
+	const firstRow = values.at(0);
+	invariant(firstRow, "no damage rows found");
+
 	const showDamageColumn =
 		!damageIsSubWeaponDamage(firstRow) ||
 		// essentially checking that we are using some sub resistance up
@@ -1592,43 +1639,43 @@ function DamageTable({
 	};
 
 	return (
-		<>
-			<Table>
-				<thead>
-					<tr>
-						<th>{t("analyzer:damage.header.type")}</th>
-						{showDistanceColumn && (
-							<th>{t("analyzer:damage.header.distance")}</th>
-						)}
-						{damageIsSubWeaponDamage(firstRow) ? (
-							<th>
-								{comparisonValues
-									? t("analyzer:damage.header.baseDamage.short")
-									: t("analyzer:damage.header.baseDamage")}
-							</th>
-						) : null}
-						{showDamageColumn && <th>{t("analyzer:damage.header.damage")}</th>}
-						{showPopovers ? <th /> : null}
-					</tr>
-				</thead>
-				<tbody>
-					{values.map((val, i) => {
-						if (val.type.includes("SECONDARY")) return null;
+		<Table>
+			<thead>
+				<tr>
+					<th>{t("analyzer:damage.header.type")}</th>
+					{showDistanceColumn && (
+						<th>{t("analyzer:damage.header.distance")}</th>
+					)}
+					{damageIsSubWeaponDamage(firstRow) ? (
+						<th>
+							{comparisonValues
+								? t("analyzer:damage.header.baseDamage.short")
+								: t("analyzer:damage.header.baseDamage")}
+						</th>
+					) : null}
+					{showDamageColumn && <th>{t("analyzer:damage.header.damage")}</th>}
+					{showPopovers ? <th /> : null}
+				</tr>
+			</thead>
+			<tbody>
+				{values.map((val, i) => {
+					if (val.type.includes("SECONDARY")) return null;
 
-						const damage = (val: AnalyzedBuild["stats"]["damages"][number]) =>
-							multiShots && damageTypeToWeaponType[val.type] === "MAIN"
-								? multiShotValues(val).join(" + ")
-								: val.value;
+					const damage = (val: AnalyzedBuild["stats"]["damages"][number]) =>
+						multiShots && damageTypeToWeaponType[val.type] === "MAIN"
+							? multiShotValues(val).join(" + ")
+							: val.value;
 
-						const typeRowName = damageIsSubWeaponDamage(val)
-							? `weapons:SUB_${val.subWeaponId}`
-							: `analyzer:damage.${val.type}`;
+					const typeRowName = damageIsSubWeaponDamage(val)
+						? `weapons:SUB_${val.subWeaponId}`
+						: `analyzer:damage.${val.type}`;
 
-						const comparisonVal = comparisonValues?.[i];
+					const comparisonVal = comparisonValues?.[i];
 
-						return (
-							<tr key={val.id}>
-								<td className="stack horizontal xs items-center">
+					return (
+						<tr key={val.id}>
+							<td>
+								<div className="stack horizontal xs items-center">
 									{damageIsSubWeaponDamage(val) ? (
 										<Image
 											alt=""
@@ -1641,55 +1688,52 @@ function DamageTable({
 									{damageIsSubWeaponDamage(val) && val.type === "SPLASH" ? (
 										<>({t("analyzer:damage.SPLASH")})</>
 									) : null}
+								</div>
+							</td>
+							{showDistanceColumn && (
+								<td>
+									{typeof val.distance === "number"
+										? val.distance
+										: val.distance?.join("-")}
 								</td>
-								{showDistanceColumn && (
-									<td>
-										{typeof val.distance === "number"
-											? val.distance
-											: val.distance?.join("-")}
-									</td>
-								)}
-								{damageIsSubWeaponDamage(val) && <td>{val.baseValue}</td>}
-								{showDamageColumn && (
-									<td>
-										{damage(val)}
-										{comparisonVal ? `/${damage(comparisonVal)}` : null}{" "}
-										{val.shotsToSplat && (
-											<span className="analyzer__shots-to-splat">
-												{t("analyzer:damage.toSplat", {
-													count: val.shotsToSplat,
-												})}
-											</span>
-										)}
-									</td>
-								)}
-								{showPopovers ? (
-									<td>
-										{renderPopover(
-											val,
-											(val as SubWeaponDamage).subWeaponId,
-										) ? (
-											<StatChartPopover
-												mainWeaponId={0}
-												modifiedBy={[]}
-												subWeaponId={(val as SubWeaponDamage).subWeaponId}
-												title={t(
-													`weapons:SUB_${(val as SubWeaponDamage).subWeaponId}`,
-												)}
-												simple
-												valueSuffix={` ${t(
-													"analyzer:damageShort",
-												).toLowerCase()}`}
-											/>
-										) : null}
-									</td>
-								) : null}
-							</tr>
-						);
-					})}
-				</tbody>
-			</Table>
-		</>
+							)}
+							{damageIsSubWeaponDamage(val) && <td>{val.baseValue}</td>}
+							{showDamageColumn && (
+								<td>
+									{damage(val)}
+									{comparisonVal ? `/${damage(comparisonVal)}` : null}{" "}
+									{val.shotsToSplat && (
+										<span className={styles.shotsToSplat}>
+											{t("analyzer:damage.toSplat", {
+												count: val.shotsToSplat,
+											})}
+										</span>
+									)}
+								</td>
+							)}
+							{showPopovers ? (
+								<td className={styles.popoverCell}>
+									{renderPopover(val, (val as SubWeaponDamage).subWeaponId) ? (
+										<StatChartPopover
+											mainWeaponId={0}
+											modifiedBy={[]}
+											subWeaponId={(val as SubWeaponDamage).subWeaponId}
+											title={t(
+												`weapons:SUB_${(val as SubWeaponDamage).subWeaponId}`,
+											)}
+											simple
+											valueSuffix={` ${t(
+												"analyzer:damageShort",
+											).toLowerCase()}`}
+										/>
+									) : null}
+								</td>
+							) : null}
+						</tr>
+					);
+				})}
+			</tbody>
+		</Table>
 	);
 }
 
@@ -1776,7 +1820,7 @@ function ConsumptionTable({
 				</tbody>
 			</Table>
 			{subWeaponId === TORPEDO_ID && (
-				<div className="analyzer__consumption-table-explanation">
+				<div className={styles.consumptionTableExplanation}>
 					{t("analyzer:torpedoExplanation")}
 				</div>
 			)}

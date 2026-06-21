@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import {
 	_action,
 	deduplicate,
@@ -19,9 +19,6 @@ export const frontPageSchema = z.union([
 		_action: _action("JOIN_TEAM"),
 	}),
 	z.object({
-		_action: _action("JOIN_TEAM_WITH_TRUST"),
-	}),
-	z.object({
 		_action: _action("ADD_FRIEND_CODE"),
 		friendCode,
 	}),
@@ -32,7 +29,7 @@ export const preparingSchema = z.union([
 		_action: _action("JOIN_QUEUE"),
 	}),
 	z.object({
-		_action: _action("ADD_TRUSTED"),
+		_action: _action("ADD_FRIEND"),
 		id,
 	}),
 ]);
@@ -56,10 +53,6 @@ export const lookingSchema = z.union([
 	}),
 	z.object({
 		_action: _action("MATCH_UP"),
-		targetGroupId: id,
-	}),
-	z.object({
-		_action: _action("MATCH_UP_RECHALLENGE"),
 		targetGroupId: id,
 	}),
 	z.object({
@@ -95,7 +88,7 @@ export const lookingSchema = z.union([
 
 export const weaponUsageSearchParamsSchema = z.object({
 	userId: id,
-	season: z.coerce.number().int(),
+	season: z.coerce.number().int().nonnegative(),
 	stageId,
 	modeShort,
 });

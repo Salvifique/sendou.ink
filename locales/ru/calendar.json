@@ -79,7 +79,18 @@
 	"filter.orgsIncluded": "",
 	"filter.orgsExcluded": "",
 	"filter.authorIdsExcluded": "",
-	"filter.authorIdsExcludedBottom": "",
 	"filter.apply": "",
-	"filter.applyAndDefault": ""
+	"filter.applyAndDefault": "",
+	"forms.draft": "",
+	"forms.draftInfo": "",
+	"forms.draftBracketStartBlocked": "",
+	"events.title": "",
+	"events.view.registered": "",
+	"events.view.hosting": "",
+	"events.view.scrims": "",
+	"events.view.saved": "",
+	"events.view.organization": "",
+	"events.empty": "",
+	"events.emptyAll": "",
+	"events.findOnCalendar": ""
 }

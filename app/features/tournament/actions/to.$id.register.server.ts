@@ -1,104 +1,103 @@
-import type { ActionFunction } from "@remix-run/node";
+import type { ActionFunction } from "react-router";
 import { requireUser } from "~/features/auth/core/user.server";
 import * as ShowcaseTournaments from "~/features/front-page/core/ShowcaseTournaments.server";
 import { MapPool } from "~/features/map-list-generator/core/map-pool";
 import { notify } from "~/features/notifications/core/notify.server";
-import * as QRepository from "~/features/sendouq/QRepository.server";
+import * as SQGroupRepository from "~/features/sendouq/SQGroupRepository.server";
 import * as TeamRepository from "~/features/team/TeamRepository.server";
+import * as SavedCalendarEventRepository from "~/features/tournament/SavedCalendarEventRepository.server";
 import * as TournamentTeamRepository from "~/features/tournament/TournamentTeamRepository.server";
 import {
 	clearTournamentDataCache,
 	tournamentFromDB,
 } from "~/features/tournament-bracket/core/Tournament.server";
+import * as TournamentLFGRepository from "~/features/tournament-lfg/TournamentLFGRepository.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
+import { parseFormDataWithImages } from "~/form/parse.server";
 import { logger } from "~/utils/logger";
-import {
-	errorToastIfFalsy,
-	parseFormData,
-	parseParams,
-	uploadImageIfSubmitted,
-} from "~/utils/remix.server";
-import { booleanToInt } from "~/utils/sql";
+import { errorToastIfFalsy, parseParams } from "~/utils/remix.server";
 import { assertUnreachable } from "~/utils/types";
 import { idObject } from "~/utils/zod";
-import { checkIn } from "../queries/checkIn.server";
-import { deleteTeam } from "../queries/deleteTeam.server";
-import deleteTeamMember from "../queries/deleteTeamMember.server";
-import { findOwnTournamentTeam } from "../queries/findOwnTournamentTeam.server";
-import { joinTeam } from "../queries/joinLeaveTeam.server";
-import { upsertCounterpickMaps } from "../queries/upsertCounterpickMaps.server";
 import { registerSchema } from "../tournament-schemas.server";
 import {
 	isOneModeTournamentOf,
 	validateCounterPickMapPool,
 } from "../tournament-utils";
 import {
-	inGameNameIfNeeded,
 	requireNotBannedByOrganization,
+	requireSendouQParticipationIfNeeded,
 } from "../tournament-utils.server";
 
 export const action: ActionFunction = async ({ request, params }) => {
-	const user = await requireUser(request);
-	const { avatarFileName, formData } = await uploadImageIfSubmitted({
-		request,
-		fileNamePrefix: "pickup-logo",
-	});
-	const data = await parseFormData({
-		formData,
-		schema: registerSchema,
-	});
-
+	const user = requireUser();
 	const { id: tournamentId } = parseParams({
 		params,
 		schema: idObject,
 	});
+
 	const tournament = await tournamentFromDB({ tournamentId, user });
+	const ownTeam = tournament.ownedTeamByUser(user);
+
+	const result = await parseFormDataWithImages({
+		request,
+		schema: registerSchema({ tournament, ownTeamId: ownTeam?.id }),
+	});
+	if (!result.success) {
+		return { fieldErrors: result.fieldErrors };
+	}
+	const data = result.data;
 
 	errorToastIfFalsy(
 		!tournament.hasStarted,
 		"Tournament has started, cannot make edits to registration",
 	);
 
-	const ownTeam = tournament.ownedTeamByUser(user);
 	const ownTeamCheckedIn = Boolean(ownTeam && ownTeam.checkIns.length > 0);
 
 	switch (data._action) {
 		case "UPSERT_TEAM": {
+			const linkedTeamId = data.teamId ? Number(data.teamId) : null;
+
 			errorToastIfFalsy(
-				!data.teamId ||
+				!linkedTeamId ||
 					(await TeamRepository.findAllMemberOfByUserId(user.id)).some(
-						(team) => team.id === data.teamId,
+						(team) => team.id === linkedTeamId,
 					),
 				"Team id does not match any of the teams you are in",
 			);
 
+			// linked teams source their name and logo from the sendou.ink team
+			const name = (
+				linkedTeamId
+					? (await TeamRepository.findById(linkedTeamId))?.name
+					: data.pickUpName
+			)!;
+
+			const avatarImgId = linkedTeamId ? null : data.logo;
+
 			if (ownTeam) {
 				errorToastIfFalsy(
-					tournament.registrationOpen || data.teamName === ownTeam.name,
+					tournament.registrationOpen || name === ownTeam.name,
 					"Can't change team name after registration has closed",
-				);
-				errorToastIfFalsy(
-					!tournament.ctx.teams.some(
-						(team) => team.name === data.teamName && team.id !== ownTeam.id,
-					),
-					"Team name already taken for this tournament",
 				);
 
 				await TournamentTeamRepository.update({
-					userId: user.id,
-					avatarFileName,
+					avatarImgId,
 					team: {
 						id: ownTeam.id,
-						name: data.teamName,
-						prefersNotToHost: booleanToInt(data.prefersNotToHost),
-						noScreen: booleanToInt(data.noScreen),
-						teamId: data.teamId ?? null,
+						name,
+						prefersNotToHost: Number(data.prefersNotToHost),
+						teamId: linkedTeamId,
 					},
 				});
 			} else {
 				await requireNotBannedByOrganization({
 					tournament,
 					user,
+				});
+				await requireSendouQParticipationIfNeeded({
+					tournament,
+					userId: user.id,
 				});
 
 				errorToastIfFalsy(!tournament.isInvitational, "Event is invite only");
@@ -114,25 +113,24 @@ export const action: ActionFunction = async ({ request, params }) => {
 					tournament.registrationOpen,
 					"Registration is closed",
 				);
-				errorToastIfFalsy(
-					!tournament.ctx.teams.some((team) => team.name === data.teamName),
-					"Team name already taken for this tournament",
-				);
 
+				await TournamentLFGRepository.leaveLfg({
+					userId: user.id,
+					tournamentId,
+				});
 				await TournamentTeamRepository.create({
-					ownerInGameName: await inGameNameIfNeeded({
-						tournament,
-						userId: user.id,
-					}),
 					team: {
-						name: data.teamName,
-						noScreen: booleanToInt(data.noScreen),
-						prefersNotToHost: booleanToInt(data.prefersNotToHost),
-						teamId: data.teamId ?? null,
+						name,
+						prefersNotToHost: Number(data.prefersNotToHost),
+						teamId: linkedTeamId,
 					},
 					userId: user.id,
 					tournamentId,
-					avatarFileName,
+					avatarImgId,
+				});
+				await SavedCalendarEventRepository.unsave({
+					userId: user.id,
+					tournamentId,
 				});
 
 				ShowcaseTournaments.addToCached({
@@ -152,20 +150,18 @@ export const action: ActionFunction = async ({ request, params }) => {
 			);
 			errorToastIfFalsy(data.userId !== user.id, "Can't kick yourself");
 
-			const detailedOwnTeam = findOwnTournamentTeam({
-				tournamentId,
-				userId: user.id,
-			});
 			// making sure they aren't unfilling one checking in condition i.e. having full roster
 			// and then having members kicked without it affecting the checking in status
 			errorToastIfFalsy(
-				detailedOwnTeam &&
-					(!detailedOwnTeam.checkedInAt ||
-						ownTeam.members.length > tournament.minMembersPerTeam),
+				!ownTeamCheckedIn ||
+					ownTeam.members.length > tournament.minMembersPerTeam,
 				"Can't kick a member after checking in",
 			);
 
-			deleteTeamMember({ tournamentTeamId: ownTeam.id, userId: data.userId });
+			await TournamentTeamRepository.leave({
+				teamId: ownTeam.id,
+				userId: data.userId,
+			});
 
 			ShowcaseTournaments.removeFromCached({
 				tournamentId,
@@ -183,9 +179,13 @@ export const action: ActionFunction = async ({ request, params }) => {
 				teamMemberOf.checkIns.length === 0,
 				"You cannot leave after checking in",
 			);
+			errorToastIfFalsy(
+				tournament.registrationOpen,
+				"Registration has closed, contact the TO to leave the team",
+			);
 
-			deleteTeamMember({
-				tournamentTeamId: teamMemberOf.id,
+			await TournamentTeamRepository.leave({
+				teamId: teamMemberOf.id,
 				userId: user.id,
 			});
 
@@ -212,7 +212,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 				"Invalid map pool",
 			);
 
-			upsertCounterpickMaps({
+			await TournamentTeamRepository.upsertCounterpickMaps({
 				tournamentTeamId: ownTeam.id,
 				mapPool: new MapPool(data.mapPool),
 			});
@@ -240,7 +240,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 				`Can't check-in - ${tournament.checkInConditionsFulfilledByTeamId(teamMemberOf.id).reason}`,
 			);
 
-			checkIn(teamMemberOf.id);
+			await TournamentTeamRepository.checkIn(teamMemberOf.id);
 			logger.info(
 				`Checking in (success): tournament team id: ${teamMemberOf.id} - user id: ${user.id} - tournament id: ${tournamentId}`,
 			);
@@ -255,14 +255,14 @@ export const action: ActionFunction = async ({ request, params }) => {
 			);
 			errorToastIfFalsy(ownTeam, "You are not registered to this tournament");
 			errorToastIfFalsy(
-				(await QRepository.usersThatTrusted(user.id)).trusters.some(
-					(trusterPlayer) => trusterPlayer.id === data.userId,
+				(await SQGroupRepository.friendsAndTeammates(user.id)).friends.some(
+					(friendPlayer) => friendPlayer.id === data.userId,
 				),
-				"No trust given from this user",
+				"Not a friend",
 			);
 			errorToastIfFalsy(
-				(await UserRepository.findLeanById(user.id))?.friendCode,
-				"No friend code",
+				(await UserRepository.findLeanById(data.userId))?.friendCode,
+				"User you are trying to add has no friend code set",
 			);
 			errorToastIfFalsy(tournament.registrationOpen, "Registration is closed");
 
@@ -271,19 +271,23 @@ export const action: ActionFunction = async ({ request, params }) => {
 				user: { id: data.userId },
 				message: "The user is banned from events hosted by this organization",
 			});
+			await requireSendouQParticipationIfNeeded({
+				tournament,
+				userId: data.userId,
+			});
 
-			joinTeam({
+			await TournamentLFGRepository.leaveLfg({
+				userId: data.userId,
+				tournamentId,
+			});
+			await TournamentTeamRepository.join({
 				userId: data.userId,
 				newTeamId: ownTeam.id,
-				tournamentId,
-				inGameName: await inGameNameIfNeeded({
-					tournament,
-					userId: data.userId,
-				}),
 			});
-			await QRepository.refreshTrust({
-				trustGiverUserId: data.userId,
-				trustReceiverUserId: user.id,
+
+			await SavedCalendarEventRepository.unsave({
+				userId: data.userId,
+				tournamentId,
 			});
 
 			ShowcaseTournaments.addToCached({
@@ -292,7 +296,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 				userId: data.userId,
 			});
 
-			if (!tournament.isTest) {
+			if (!tournament.isTest && !tournament.isDraft) {
 				notify({
 					userIds: [data.userId],
 					notification: {
@@ -304,7 +308,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 							tournamentName: tournament.ctx.name,
 							tournamentTeamId: ownTeam.id,
 						},
-						pictureUrl: tournament.logoSrc,
+						pictureUrl: tournament.ctx.logoUrl,
 					},
 				});
 			}
@@ -322,7 +326,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 				"Unregistering from leagues is not possible after registration has closed",
 			);
 
-			deleteTeam(ownTeam.id);
+			await TournamentTeamRepository.del(ownTeam.id);
 
 			for (const member of ownTeam.members) {
 				ShowcaseTournaments.removeFromCached({
@@ -336,13 +340,6 @@ export const action: ActionFunction = async ({ request, params }) => {
 					newTeamCount: tournament.ctx.teams.length - 1,
 				});
 			}
-
-			break;
-		}
-		case "DELETE_LOGO": {
-			errorToastIfFalsy(ownTeam, "You are not registered to this tournament");
-
-			await TournamentTeamRepository.deleteLogo(ownTeam.id);
 
 			break;
 		}

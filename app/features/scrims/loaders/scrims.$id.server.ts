@@ -1,15 +1,20 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
+import { chatAccessible } from "~/features/chat/chat-utils";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
+import { databaseTimestampToDate } from "~/utils/dates";
 import { notFoundIfFalsy } from "../../../utils/remix.server";
-import { requireUser } from "../../auth/core/user.server";
+import {
+	type AuthenticatedUser,
+	requireUser,
+} from "../../auth/core/user.server";
 import * as Scrim from "../core/Scrim";
+import * as ScrimMapByMap from "../core/ScrimMapByMap";
+import * as ScrimMapListRepository from "../ScrimMapListRepository.server";
+import * as ScrimMapRepository from "../ScrimMapRepository.server";
 import * as ScrimPostRepository from "../ScrimPostRepository.server";
-import { FF_SCRIMS_ENABLED } from "../scrims-constants";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-	notFoundIfFalsy(FF_SCRIMS_ENABLED);
-
-	const user = await requireUser(request);
+export const loader = async ({ params }: LoaderFunctionArgs) => {
+	const user = requireUser();
 
 	const post = notFoundIfFalsy(
 		await ScrimPostRepository.findById(Number(params.id)),
@@ -23,10 +28,57 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 		throw new Response(null, { status: 403 });
 	}
 
+	const participantIds = Scrim.participantIdsListFromAccepted(post);
+
+	const anyUserPrefersNoScreen =
+		await UserRepository.anyUserPrefersNoScreen(participantIds);
+
+	const mapByMap = await resolveMapByMap({ post, user });
+
 	return {
 		post,
-		chatUsers: await UserRepository.findChatUsersByUserIds(
-			Scrim.participantIdsListFromAccepted(post),
-		),
+		chatCode:
+			(user.roles.includes("STAFF") || participantIds.includes(user.id)) &&
+			chatAccessible({
+				isStaff: user.roles.includes("STAFF"),
+				expiresAfterDays: 1,
+				comparedTo: databaseTimestampToDate(Scrim.getStartTime(post)),
+			})
+				? post.chatCode
+				: undefined,
+		anyUserPrefersNoScreen,
+		mapByMap,
 	};
 };
+
+async function resolveMapByMap({
+	post,
+	user,
+}: {
+	post: NonNullable<Awaited<ReturnType<typeof ScrimPostRepository.findById>>>;
+	user: AuthenticatedUser;
+}) {
+	const [mapLists, maps] = await Promise.all([
+		ScrimMapListRepository.findMapListsByScrimPostId(post.id),
+		ScrimMapRepository.findMapsByScrimPostId(post.id),
+	]);
+
+	const pool = mapLists.length > 0 ? ScrimMapByMap.unionPool(mapLists) : null;
+	const currentMap = maps.find((m) => m.reportedAt === null) ?? null;
+	const viewerSide = Scrim.sideOfUser(post, user.id);
+	const locked = Scrim.isTrackingLocked(maps, mapLists);
+
+	const ownList = viewerSide
+		? mapLists.find((l) => l.side === viewerSide)
+		: undefined;
+
+	return {
+		mapLists,
+		maps,
+		currentMap,
+		viewerSide,
+		locked,
+		pool: pool ? pool.stageModePairs : null,
+		ownPool: ownList?.mapList ?? null,
+	};
+}

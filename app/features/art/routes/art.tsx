@@ -1,25 +1,35 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import type { ShouldRevalidateFunction } from "@remix-run/react";
-import { useLoaderData, useSearchParams } from "@remix-run/react";
+import clsx from "clsx";
+import { X } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { AddNewButton } from "~/components/AddNewButton";
+import type { MetaFunction, ShouldRevalidateFunction } from "react-router";
+import { useLoaderData, useSearchParams } from "react-router";
 import { SendouButton } from "~/components/elements/Button";
 import { SendouSwitch } from "~/components/elements/Switch";
-import { CrossIcon } from "~/components/icons/Cross";
+import {
+	SendouTab,
+	SendouTabList,
+	SendouTabPanel,
+	SendouTabs,
+} from "~/components/elements/Tabs";
 import { Label } from "~/components/Label";
 import { Main } from "~/components/Main";
 import type { SendouRouteHandle } from "~/utils/remix.server";
-import { artPage, navIconUrl, newArtPage } from "~/utils/urls";
-import { metaTags } from "../../../utils/remix";
+import { artPage, navIconUrl } from "~/utils/urls";
+import { metaTags, type SerializeFrom } from "../../../utils/remix";
 import { FILTERED_TAG_KEY_SEARCH_PARAM_KEY } from "../art-constants";
 import { ArtGrid } from "../components/ArtGrid";
 import { TagSelect } from "../components/TagSelect";
-
 import { loader } from "../loaders/art.server";
+
 export { loader };
 
 const OPEN_COMMISIONS_KEY = "open";
+const TAB_KEY = "tab";
+const TABS = {
+	RECENTLY_UPLOADED: "recently-uploaded",
+	SHOWCASE: "showcase",
+} as const;
 
 export const shouldRevalidate: ShouldRevalidateFunction = (args) => {
 	const currentFilteredTag = args.currentUrl.searchParams.get(
@@ -58,17 +68,22 @@ export const meta: MetaFunction = (args) => {
 };
 
 export default function ArtPage() {
-	const { t } = useTranslation(["art", "common"]);
+	const { t } = useTranslation(["art", "common", "forms"]);
 	const data = useLoaderData<typeof loader>();
 	const [searchParams, setSearchParams] = useSearchParams();
 	const switchId = React.useId();
 
+	const selectedTab = searchParams.get(TAB_KEY) ?? TABS.RECENTLY_UPLOADED;
 	const filteredTag = searchParams.get(FILTERED_TAG_KEY_SEARCH_PARAM_KEY);
 	const showOpenCommissions = searchParams.get(OPEN_COMMISIONS_KEY) === "true";
 
-	const arts = !showOpenCommissions
-		? data.arts
-		: data.arts.filter((art) => art.author?.commissionsOpen);
+	const showcaseArts = !showOpenCommissions
+		? data.showcaseArts
+		: data.showcaseArts.filter((art) => art.author?.commissionsOpen);
+
+	const recentlyUploadedArts = !showOpenCommissions
+		? data.recentlyUploadedArts
+		: data.recentlyUploadedArts.filter((art) => art.author?.commissionsOpen);
 
 	return (
 		<Main className="stack lg">
@@ -85,21 +100,30 @@ export default function ArtPage() {
 						id={switchId}
 					/>
 					<Label htmlFor={switchId} className="m-auto-0">
-						{t("art:openCommissionsOnly")}
+						{t("forms:labels.profileCommissionsOpen")}
 					</Label>
 				</div>
-				<div className="stack horizontal sm items-center">
+				<div
+					className={clsx({
+						invisible: selectedTab !== TABS.SHOWCASE,
+					})}
+				>
 					<TagSelect
 						key={filteredTag}
 						tags={data.allTags}
 						onSelectionChange={(tagName) => {
-							setSearchParams((prev) => {
-								prev.set(FILTERED_TAG_KEY_SEARCH_PARAM_KEY, tagName as string);
-								return prev;
-							});
+							setSearchParams(
+								(prev) => {
+									prev.set(
+										FILTERED_TAG_KEY_SEARCH_PARAM_KEY,
+										tagName as string,
+									);
+									return prev;
+								},
+								{ replace: true },
+							);
 						}}
 					/>
-					<AddNewButton navIcon="art" to={newArtPage()} />
 				</div>
 			</div>
 			{filteredTag ? (
@@ -108,12 +132,15 @@ export default function ArtPage() {
 					<SendouButton
 						size="small"
 						variant="minimal-destructive"
-						icon={<CrossIcon />}
+						icon={<X />}
 						onPress={() => {
-							setSearchParams((prev) => {
-								prev.delete(FILTERED_TAG_KEY_SEARCH_PARAM_KEY);
-								return prev;
-							});
+							setSearchParams(
+								(prev) => {
+									prev.delete(FILTERED_TAG_KEY_SEARCH_PARAM_KEY);
+									return prev;
+								},
+								{ replace: true },
+							);
 						}}
 						data-testid="clear-filter-button"
 					>
@@ -121,7 +148,40 @@ export default function ArtPage() {
 					</SendouButton>
 				</div>
 			) : null}
-			<ArtGrid arts={arts} />
+			<SendouTabs
+				selectedKey={selectedTab}
+				onSelectionChange={(key) => {
+					setSearchParams(
+						(prev) => {
+							prev.set(TAB_KEY, key as string);
+							if (key === TABS.RECENTLY_UPLOADED) {
+								prev.delete(FILTERED_TAG_KEY_SEARCH_PARAM_KEY);
+							}
+							return prev;
+						},
+						{ replace: true },
+					);
+				}}
+			>
+				<SendouTabList>
+					<SendouTab id={TABS.RECENTLY_UPLOADED}>
+						{t("art:tabs.recentlyUploaded")}
+					</SendouTab>
+					<SendouTab id={TABS.SHOWCASE}>{t("art:tabs.showcase")}</SendouTab>
+				</SendouTabList>
+				<SendouTabPanel id={TABS.RECENTLY_UPLOADED}>
+					<ArtGrid arts={recentlyUploadedArts} showUploadDate />
+				</SendouTabPanel>
+				<SendouTabPanel id={TABS.SHOWCASE}>
+					{filteredTag && showcaseArts.length === 0 ? (
+						<div className="no-results mt-4">
+							{t("art:noArtForTag", { tag: filteredTag })}
+						</div>
+					) : (
+						<ArtGrid arts={showcaseArts} />
+					)}
+				</SendouTabPanel>
+			</SendouTabs>
 		</Main>
 	);
 }

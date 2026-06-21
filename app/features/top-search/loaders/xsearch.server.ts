@@ -1,14 +1,12 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
 import { rankedModesShort } from "~/modules/in-game-lists/modes";
 import type { RankedModeShort } from "~/modules/in-game-lists/types";
-import { findPlacementsOfMonth } from "../queries/findPlacements.server";
-import { monthYears } from "../queries/monthYears";
+import * as XRankPlacementRepository from "../XRankPlacementRepository.server";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-	const availableMonthYears = monthYears();
+export const loader = async ({ url }: LoaderFunctionArgs) => {
+	const availableMonthYears = await XRankPlacementRepository.monthYears();
 	const { month: latestMonth, year: latestYear } = availableMonthYears[0];
 
-	const url = new URL(request.url);
 	const mode = (() => {
 		const mode = url.searchParams.get("mode");
 		if (rankedModesShort.includes(mode as any)) {
@@ -48,7 +46,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		return latestYear;
 	})();
 
-	const placements = findPlacementsOfMonth({
+	const placements = await XRankPlacementRepository.findPlacementsOfMonth({
 		mode,
 		region,
 		month,

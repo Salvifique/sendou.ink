@@ -1,9 +1,9 @@
-import type { ActionFunctionArgs } from "@remix-run/node";
-import { z } from "zod/v4";
+import type { ActionFunctionArgs } from "react-router";
+import { z } from "zod";
 import * as AdminRepository from "~/features/admin/AdminRepository.server";
-import { makeArtist } from "~/features/art/queries/makeArtist.server";
 import { requireUser } from "~/features/auth/core/user.server";
 import { refreshBannedCache } from "~/features/ban/core/banned.server";
+import * as BuildRepository from "~/features/builds/BuildRepository.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
 import { requireRole } from "~/modules/permissions/guards.server";
 import {
@@ -21,12 +21,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 		request,
 		schema: adminActionSchema,
 	});
-	const user = await requireUser(request);
+	const user = requireUser();
 
 	let message: string;
 	switch (data._action) {
 		case "MIGRATE": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
 			try {
 				const errorMessage = await AdminRepository.migrate({
@@ -37,6 +37,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 				if (errorMessage) {
 					errorToast(`Migration failed. Reason: ${errorMessage}`);
 				}
+
+				await refreshBannedCache();
 
 				message = "Account migrated";
 				break;
@@ -51,17 +53,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			}
 		}
 		case "REFRESH": {
-			requireRole(user, "ADMIN");
+			requireRole("ADMIN");
 
 			await AdminRepository.replacePlusTiers(
 				await plusTiersFromVotingAndLeaderboard(),
 			);
 
+			await BuildRepository.recalculateAllSortValues();
+
 			message = "Plus tiers refreshed";
 			break;
 		}
 		case "FORCE_PATRON": {
-			requireRole(user, "ADMIN");
+			requireRole("ADMIN");
 
 			await AdminRepository.forcePatron({
 				id: data.user,
@@ -74,7 +78,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			break;
 		}
 		case "CLEAN_UP": {
-			requireRole(user, "ADMIN");
+			requireRole("ADMIN");
 
 			// on purpose sync
 			AdminRepository.cleanUp();
@@ -83,15 +87,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			break;
 		}
 		case "ARTIST": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
-			makeArtist(data.user);
+			await AdminRepository.makeArtistByUserId(data.user);
 
 			message = "Artist permissions given";
 			break;
 		}
 		case "VIDEO_ADDER": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
 			await AdminRepository.makeVideoAdderByUserId(data.user);
 
@@ -99,7 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			break;
 		}
 		case "TOURNAMENT_ORGANIZER": {
-			requireRole(user, "STAFF");
+			requireRole("ADMIN");
 
 			await AdminRepository.makeTournamentOrganizerByUserId(data.user);
 
@@ -107,7 +111,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			break;
 		}
 		case "LINK_PLAYER": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
 			await AdminRepository.linkUserAndPlayer({
 				userId: data.user,
@@ -118,7 +122,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			break;
 		}
 		case "BAN_USER": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
 			await AdminRepository.banUser({
 				bannedReason: data.reason ?? null,
@@ -127,26 +131,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 				bannedByUserId: user.id,
 			});
 
-			refreshBannedCache();
+			await refreshBannedCache();
 
 			message = "User banned";
 			break;
 		}
 		case "UNBAN_USER": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
 			await AdminRepository.unbanUser({
 				userId: data.user,
 				unbannedByUserId: user.id,
 			});
 
-			refreshBannedCache();
+			await refreshBannedCache();
 
 			message = "User unbanned";
 			break;
 		}
 		case "UPDATE_FRIEND_CODE": {
-			requireRole(user, "STAFF");
+			requireRole("STAFF");
 
 			await UserRepository.insertFriendCode({
 				friendCode: data.friendCode,
@@ -155,6 +159,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 			});
 
 			message = "Friend code updated";
+			break;
+		}
+		case "API_ACCESS": {
+			requireRole("ADMIN");
+
+			await AdminRepository.makeApiAccesserByUserId(data.user);
+
+			message = "API access granted";
 			break;
 		}
 		default: {
@@ -213,6 +225,10 @@ export const adminActionSchema = z.union([
 	z.object({
 		_action: _action("UPDATE_FRIEND_CODE"),
 		friendCode,
+		user: z.preprocess(actualNumber, z.number().positive()),
+	}),
+	z.object({
+		_action: _action("API_ACCESS"),
 		user: z.preprocess(actualNumber, z.number().positive()),
 	}),
 ]);

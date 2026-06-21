@@ -1,12 +1,12 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import { Link, useLoaderData } from "@remix-run/react";
+import { Unlink } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Link, useLoaderData } from "react-router";
 import { SendouButton } from "~/components/elements/Button";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
-import { UnlinkIcon } from "~/components/icons/Unlink";
 import { Main } from "~/components/Main";
 import { useUser } from "~/features/auth/core/user";
-import { metaTags } from "~/utils/remix";
+import { metaTags, type SerializeFrom } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
 	navIconUrl,
@@ -17,9 +17,8 @@ import {
 import { action } from "../actions/xsearch.player.$id.server";
 import { PlacementsTable } from "../components/Placements";
 import { loader } from "../loaders/xsearch.player.$id.server";
-export { loader, action };
 
-import "../top-search.css";
+export { action, loader };
 
 export const handle: SendouRouteHandle = {
 	breadcrumb: ({ match }) => {
@@ -59,22 +58,28 @@ export const meta: MetaFunction<typeof loader> = (args) => {
 	});
 };
 
+function hasUserLinked<T extends { discordId: string | null }>(
+	user: T,
+): user is T & { discordId: string } {
+	return user.discordId !== null;
+}
+
 export default function XSearchPlayerPage() {
 	const { t } = useTranslation(["common"]);
 	const data = useLoaderData<typeof loader>();
 	const user = useUser();
 
-	const hasUserLinked = Boolean(data.placements[0].discordId);
+	const placementUser = data.placements[0];
 
 	const isLinkedToCurrentUser =
-		user && user?.discordId === data.placements[0].discordId;
+		user && user?.discordId === placementUser.discordId;
 
 	return (
 		<Main halfWidth className="stack lg">
 			<div>
 				<h2 className="text-lg">
-					{hasUserLinked ? (
-						<Link to={userPage(data.placements[0])}>{data.names.primary}</Link>
+					{hasUserLinked(placementUser) ? (
+						<Link to={userPage(placementUser)}>{data.names.primary}</Link>
 					) : (
 						data.names.primary
 					)}{" "}
@@ -101,7 +106,7 @@ function UnlinkFormWithButton() {
 			submitButtonText={t("common:xsearch.unlink.action.short")}
 		>
 			<SendouButton
-				icon={<UnlinkIcon />}
+				icon={<Unlink />}
 				variant="destructive"
 				size="miniscule"
 				className="mt-2 self-start"

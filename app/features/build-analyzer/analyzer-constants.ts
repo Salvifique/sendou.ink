@@ -1,4 +1,3 @@
-import type { MainWeaponId } from "~/modules/in-game-lists/types";
 import type { DamageType } from "./analyzer-types";
 
 export const MAX_LDE_INTENSITY = 21;
@@ -41,11 +40,14 @@ export const DAMAGE_TYPE = [
 	"SPECIAL_CANNON",
 	"SPECIAL_BULLET_MAX",
 	"SPECIAL_BULLET_MIN",
+	"SPECIAL_SPLASH_MAX",
+	"SPECIAL_SPLASH_MIN",
 	"SPECIAL_BUMP",
 	"SPECIAL_JUMP",
 	"SPECIAL_TICK",
 	"SECONDARY_MODE_MAX",
 	"SECONDARY_MODE_MIN",
+	"COMBO",
 ] as const;
 
 export const damageTypeToWeaponType: Record<
@@ -90,39 +92,20 @@ export const damageTypeToWeaponType: Record<
 	SPECIAL_THROW_DIRECT: "SPECIAL",
 	SPECIAL_BULLET_MIN: "SPECIAL",
 	SPECIAL_BULLET_MAX: "SPECIAL",
+	SPECIAL_SPLASH_MAX: "SPECIAL",
+	SPECIAL_SPLASH_MIN: "SPECIAL",
 	SPECIAL_CANNON: "SPECIAL",
 	SPECIAL_BUMP: "SPECIAL",
 	SPECIAL_JUMP: "SPECIAL",
 	SPECIAL_TICK: "SPECIAL",
+	COMBO: "MAIN",
 };
-
-const rawMultiShot: Partial<Record<MainWeaponId, number>> = {
-	// L-3
-	300: 3,
-	// H-3
-	310: 3,
-	// Tri-Stringer,
-	7010: 3,
-	// REEF-LUX,
-	7020: 3,
-	// Wellstring V,
-	7030: 5,
-	// Bloblobber
-	3030: 4,
-	// Dread Winger
-	3050: 2,
-};
-
-// automatically handle alt kits
-export const multiShot = Object.fromEntries(
-	Object.entries(rawMultiShot).flatMap(([key, value]) => [
-		[Number(key), value],
-		[Number(key) + 1, value],
-	]),
-) as Record<MainWeaponId, number>;
 
 export const RAINMAKER_SPEED_PENALTY_MODIFIER = 0.8;
 
 export const UNKNOWN_SHORT = "U";
 
 export const MAX_AP = 57;
+
+export const MAIN_SLOT_AP = 10;
+export const SUB_SLOT_AP = 3;

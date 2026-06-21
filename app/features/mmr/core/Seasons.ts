@@ -1,3 +1,6 @@
+import { Config } from "~/config";
+import { IS_E2E_TEST_RUN } from "~/utils/e2e";
+
 /**
  * List of seasons with their respective start and end dates.
  *
@@ -13,11 +16,10 @@
  * console.log(Seasons.list[0].starts); // Logs the start date of the first season
  */
 export const list =
-	// when we do npm run setup NODE_ENV is not set -> use test seasons
+	// when we do pnpm run setup NODE_ENV is not set -> use test seasons
 	!process.env.NODE_ENV ||
-	// this gets checked when the project is running
-	(process.env.NODE_ENV === "development" &&
-		import.meta.env.VITE_PROD_MODE !== "true")
+	IS_E2E_TEST_RUN ||
+	(process.env.NODE_ENV === "development" && !Config.prodMode)
 		? ([
 				{
 					nth: 0,
@@ -75,6 +77,26 @@ export const list =
 					nth: 8,
 					starts: new Date("2025-06-16T18:00:00.000Z"),
 					ends: new Date("2025-08-24T22:00:00.000Z"),
+				},
+				{
+					nth: 9,
+					starts: new Date("2025-09-08T17:00:00.000Z"),
+					ends: new Date("2025-11-23T22:00:00.000Z"),
+				},
+				{
+					nth: 10,
+					starts: new Date("2025-12-08T17:00:00.000Z"),
+					ends: new Date("2026-02-22T22:00:00.000Z"),
+				},
+				{
+					nth: 11,
+					starts: new Date("2026-03-09T17:00:00.000Z"),
+					ends: new Date("2026-05-17T22:00:00.000Z"),
+				},
+				{
+					nth: 12,
+					starts: new Date("2026-06-01T17:00:00.000Z"),
+					ends: new Date("2026-08-23T22:00:00.000Z"),
 				},
 			] as const);
 
@@ -142,7 +164,7 @@ export function next(date = new Date()): ListItem | null {
  * @throws {Error} If the season does not exist.
  */
 export function nthToDateRange(nth: number) {
-	const seasonObject = list.at(nth);
+	const seasonObject = list[nth];
 	if (!seasonObject) {
 		throw new Error(`Season ${nth} not found`);
 	}
@@ -156,7 +178,7 @@ export function nthToDateRange(nth: number) {
 /**
  * Retrieves a list of season numbers that have started based on the provided date (defaults to now).
  *
- * @returns An array of season numbers in asceding order. If no seasons have started, returns an array containing only `[0]`.
+ * @returns An array of season numbers in descending order (newest first). If no seasons have started, returns an array containing only `[0]`.
  */
 export function allStarted(date = new Date()) {
 	const startedSeasons = list.filter((s) => date >= s.starts);
@@ -165,4 +187,13 @@ export function allStarted(date = new Date()) {
 	}
 
 	return [0];
+}
+/**
+ * Retrieves a list of season numbers that have finished based on the provided date (defaults to now).
+ *
+ * @returns An array of season numbers in descending order. If no seasons have finished, returns an empty array.
+ */
+export function allFinished(date = new Date()) {
+	const finishedSeasons = list.filter((s) => date > s.ends);
+	return finishedSeasons.map((s) => s.nth).reverse();
 }

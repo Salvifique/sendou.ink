@@ -28,9 +28,12 @@ export function sortBuilds({
 			Math.min(...a.weapons.map((wpn) => wpn.weaponSplId)) -
 			Math.min(...b.weapons.map((wpn) => wpn.weaponSplId)),
 		UPDATED_AT: (a, b) => b.updatedAt - a.updatedAt,
-		HEADGEAR_ID: (a, b) => a.headGearSplId - b.headGearSplId,
-		CLOTHES_ID: (a, b) => a.clothesGearSplId - b.clothesGearSplId,
-		SHOES_ID: (a, b) => a.shoesGearSplId - b.shoesGearSplId,
+		HEADGEAR_ID: (a, b) =>
+			compareNullableNumbers(a.headGearSplId, b.headGearSplId),
+		CLOTHES_ID: (a, b) =>
+			compareNullableNumbers(a.clothesGearSplId, b.clothesGearSplId),
+		SHOES_ID: (a, b) =>
+			compareNullableNumbers(a.shoesGearSplId, b.shoesGearSplId),
 		MODE: (a, b) => {
 			const aLowestModeIdx = modesShort.findIndex((mode) =>
 				a.modes?.includes(mode),
@@ -45,11 +48,11 @@ export function sortBuilds({
 			return aLowestModeIdx - bLowestModeIdx;
 		},
 		TOP_500: (a, b) => {
-			const aHas = a.weapons.some((wpn) => wpn.maxPower !== null);
-			const bHas = b.weapons.some((wpn) => wpn.maxPower !== null);
+			const aHasTop500 = a.weapons.some((wpn) => wpn.isTop500 === 1);
+			const bHasTop500 = b.weapons.some((wpn) => wpn.isTop500 === 1);
 
-			if (aHas && !bHas) return -1;
-			if (!aHas && bHas) return 1;
+			if (aHasTop500 && !bHasTop500) return -1;
+			if (!aHasTop500 && bHasTop500) return 1;
 
 			return 0;
 		},
@@ -103,4 +106,11 @@ export function sortBuilds({
 
 		return 0;
 	});
+}
+
+function compareNullableNumbers(a: number | null, b: number | null) {
+	if (a === null && b === null) return 0;
+	if (a === null) return 1;
+	if (b === null) return -1;
+	return a - b;
 }

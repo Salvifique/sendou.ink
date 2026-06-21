@@ -1,11 +1,12 @@
-import type {
-	Group,
-	InputStage,
-	Match,
-	Round,
-	Seeding,
-	SeedOrdering,
-	Stage,
+import {
+	type Group,
+	type InputStage,
+	type Match,
+	type Round,
+	type Seeding,
+	type SeedOrdering,
+	type Stage,
+	Status,
 } from "~/modules/brackets-model";
 import type { BracketsManager } from ".";
 import * as helpers from "./helpers";
@@ -29,13 +30,11 @@ export function create(this: BracketsManager, stage: InputStage): Stage {
 	return instance.run();
 }
 
-export class Create {
+class Create {
 	private storage: Storage;
 	private stage: InputStage;
 	private readonly seedOrdering: SeedOrdering[];
-	private updateMode: boolean;
 	private enableByesInUpdate: boolean;
-	private currentStageId!: number;
 
 	/**
 	 * Creates an instance of Create, which will handle the creation of the stage.
@@ -48,7 +47,6 @@ export class Create {
 		this.stage = stage;
 		this.stage.settings = this.stage.settings || {};
 		this.seedOrdering = this.stage.settings.seedOrdering || [];
-		this.updateMode = false;
 		this.enableByesInUpdate = false;
 
 		if (!this.stage.name) throw Error("You must provide a name for the stage.");
@@ -97,28 +95,39 @@ export class Create {
 	}
 
 	/**
-	 * Enables the update mode.
-	 *
-	 * @param stageId ID of the stage.
-	 * @param enableByes Whether to use BYEs or TBDs for `null` values in an input seeding.
-	 */
-	public setExisting(stageId: number, enableByes: boolean): void {
-		this.updateMode = true;
-		this.currentStageId = stageId;
-		this.enableByesInUpdate = enableByes;
-	}
-
-	/**
 	 * Creates a round-robin stage.
 	 *
 	 * Group count must be given. It will distribute participants in groups and rounds.
 	 */
 	private roundRobin(): Stage {
+		if (this.stage.settings?.hasAbDivisions) return this.abDivisionRoundRobin();
+
 		const groups = this.getRoundRobinGroups();
 		const stage = this.createStage();
 
 		for (let i = 0; i < groups.length; i++)
 			this.createRoundRobinGroup(stage.id, i + 1, groups[i]);
+
+		return stage;
+	}
+
+	/**
+	 * Creates a bipartite (A/B divisions) round-robin stage.
+	 *
+	 * Participants are partitioned into two pools by `abDivisions` (parallel to the seeding).
+	 * Each group receives equal A and B teams, and matches only pair A against B.
+	 */
+	private abDivisionRoundRobin(): Stage {
+		const groups = this.getAbDivisionGroups();
+		const stage = this.createStage();
+
+		for (let i = 0; i < groups.length; i++)
+			this.createAbDivisionRoundRobinGroup(
+				stage.id,
+				i + 1,
+				groups[i].a,
+				groups[i].b,
+			);
 
 		return stage;
 	}
@@ -189,6 +198,7 @@ export class Create {
 			directInWb,
 		);
 
+		// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: Biome 2.3.1 upgrade
 		if (helpers.isDoubleEliminationNecessary(this.stage.settings?.size!)) {
 			const winnerLb = this.createLowerBracket(stageId, 2, [
 				directInLb,
@@ -214,6 +224,7 @@ export class Create {
 			slots,
 		);
 
+		// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: Biome 2.3.1 upgrade
 		if (helpers.isDoubleEliminationNecessary(this.stage.settings?.size!)) {
 			const winnerLb = this.createLowerBracket(stageId, 2, losersWb);
 			this.createGrandFinal(stageId, winnerWb, winnerLb);
@@ -245,6 +256,33 @@ export class Create {
 			slots,
 			this.stage.settings?.roundRobinMode,
 		);
+
+		for (let i = 0; i < rounds.length; i++)
+			this.createRound(stageId, groupId, i + 1, rounds[0].length, rounds[i]);
+	}
+
+	/**
+	 * Creates a bipartite round-robin group where every A team plays every B team exactly once.
+	 *
+	 * @param stageId ID of the parent stage.
+	 * @param number Number in the stage.
+	 * @param slotsA Slots in division A (ordered by seed).
+	 * @param slotsB Slots in division B (ordered by seed).
+	 */
+	private createAbDivisionRoundRobinGroup(
+		stageId: number,
+		number: number,
+		slotsA: ParticipantSlot[],
+		slotsB: ParticipantSlot[],
+	): void {
+		const groupId = this.insertGroup({
+			stage_id: stageId,
+			number,
+		});
+
+		if (groupId === -1) throw Error("Could not insert the group.");
+
+		const rounds = helpers.makeAbDivisionRoundRobinMatches(slotsA, slotsB);
 
 		for (let i = 0; i < rounds.length; i++)
 			this.createRound(stageId, groupId, i + 1, rounds[0].length, rounds[i]);
@@ -302,6 +340,7 @@ export class Create {
 		number: number,
 		losers: ParticipantSlot[][],
 	): ParticipantSlot {
+		// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: Biome 2.3.1 upgrade
 		const participantCount = this.stage.settings?.size!;
 		const roundPairCount = helpers.getRoundPairCount(participantCount);
 
@@ -393,8 +432,9 @@ export class Create {
 
 		if (roundId === -1) throw Error("Could not insert the round.");
 
-		for (let i = 0; i < matchCount; i++)
-			this.createMatch(stageId, groupId, roundId, i + 1, duels[i]);
+		for (let i = 0; i < matchCount; i++) {
+			this.createMatch(stageId, groupId, roundId, i + 1, roundNumber, duels[i]);
+		}
 	}
 
 	/**
@@ -411,6 +451,7 @@ export class Create {
 		groupId: number,
 		roundId: number,
 		matchNumber: number,
+		roundNumber: number,
 		opponents: Duel,
 	): void {
 		const opponent1 = helpers.toResultWithPosition(opponents[0]);
@@ -424,20 +465,16 @@ export class Create {
 		)
 			return;
 
-		let existing: Match | null = null;
 		let status = helpers.getMatchStatus(opponents);
 
-		if (this.updateMode) {
-			existing = this.storage.selectFirst("match", {
-				round_id: roundId,
-				number: matchNumber,
-			});
-
-			if (existing) {
-				// Keep the most advanced status when updating a match.
-				const existingStatus = helpers.getMatchStatus(existing);
-				if (existingStatus > status) status = existingStatus;
-			}
+		// In round-robin, only the first round is ready to play at the beginning.
+		// other matches have teams set but they are busy playing the first round.
+		if (
+			this.stage.type === "round_robin" &&
+			roundNumber > 1 &&
+			!this.stage.settings?.independentRounds
+		) {
+			status = Status.Locked;
 		}
 
 		const parentId = this.insertMatch(
@@ -446,11 +483,11 @@ export class Create {
 				stage_id: stageId,
 				group_id: groupId,
 				round_id: roundId,
-				status: status,
+				status,
 				opponent1,
 				opponent2,
 			},
-			existing,
+			null,
 		);
 
 		if (parentId === -1) throw Error("Could not insert the match.");
@@ -698,6 +735,58 @@ export class Create {
 	}
 
 	/**
+	 * Partitions the seeded slots into A and B pools then distributes them into groups
+	 * such that each group has an equal number of A and B participants.
+	 */
+	private getAbDivisionGroups(): {
+		a: ParticipantSlot[];
+		b: ParticipantSlot[];
+	}[] {
+		if (
+			this.stage.settings?.groupCount === undefined ||
+			!Number.isInteger(this.stage.settings.groupCount)
+		)
+			throw Error("You must specify a group count for round-robin stages.");
+
+		if (this.stage.settings.groupCount <= 0)
+			throw Error("You must provide a strictly positive group count.");
+
+		const abDivisions = this.stage.abDivisions;
+		if (!abDivisions)
+			throw Error(
+				"abDivisions must be provided when hasAbDivisions is enabled.",
+			);
+
+		const slots = this.getSlots();
+
+		if (abDivisions.length !== slots.length)
+			throw Error("abDivisions length must match the seeding length.");
+
+		const divisionA: ParticipantSlot[] = [];
+		const divisionB: ParticipantSlot[] = [];
+
+		for (let i = 0; i < slots.length; i++) {
+			const slot = slots[i];
+			if (slot === null)
+				throw Error("BYEs are not supported with A/B divisions.");
+
+			const division = abDivisions[i];
+			if (division === 0) divisionA.push(slot);
+			else if (division === 1) divisionB.push(slot);
+			else
+				throw Error(
+					`Participant at seed ${i + 1} is missing an A/B division assignment.`,
+				);
+		}
+
+		return helpers.makeAbDivisionGroups(
+			divisionA,
+			divisionB,
+			this.stage.settings.groupCount,
+		);
+	}
+
+	/**
 	 * Returns the ordering method for the groups in a round-robin stage.
 	 */
 	public getRoundRobinOrdering(): SeedOrdering {
@@ -752,14 +841,7 @@ export class Create {
 	 * @param stage The stage to insert.
 	 */
 	private insertStage(stage: OmitId<Stage>): number {
-		let existing: Stage | null = null;
-
-		if (this.updateMode)
-			existing = this.storage.select("stage", this.currentStageId);
-
-		if (!existing) return this.storage.insert("stage", stage);
-
-		return existing.id;
+		return this.storage.insert("stage", stage);
 	}
 
 	/**
@@ -768,18 +850,7 @@ export class Create {
 	 * @param group The group to insert.
 	 */
 	private insertGroup(group: OmitId<Group>): number {
-		let existing: Group | null = null;
-
-		if (this.updateMode) {
-			existing = this.storage.selectFirst("group", {
-				stage_id: group.stage_id,
-				number: group.number,
-			});
-		}
-
-		if (!existing) return this.storage.insert("group", group);
-
-		return existing.id;
+		return this.storage.insert("group", group);
 	}
 
 	/**
@@ -788,18 +859,7 @@ export class Create {
 	 * @param round The round to insert.
 	 */
 	private insertRound(round: OmitId<Round>): number {
-		let existing: Round | null = null;
-
-		if (this.updateMode) {
-			existing = this.storage.selectFirst("round", {
-				group_id: round.group_id,
-				number: round.number,
-			});
-		}
-
-		if (!existing) return this.storage.insert("round", round);
-
-		return existing.id;
+		return this.storage.insert("round", round);
 	}
 
 	/**

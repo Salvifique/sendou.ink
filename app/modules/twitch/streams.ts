@@ -1,10 +1,9 @@
 import { cachified } from "@epic-web/cachified";
 import { cache } from "~/utils/cache.server";
+import { IS_E2E_TEST_RUN } from "~/utils/e2e";
 import { logger } from "~/utils/logger";
-import type { Unpacked } from "~/utils/types";
+import { twitchFetch } from "./fetch";
 import { type RawStream, type StreamsResponse, streamsSchema } from "./schemas";
-import { getToken, purgeCachedToken } from "./token";
-import { getTwitchEnvVars } from "./utils";
 
 // const STREAMS_MOCK = [
 //   {
@@ -92,8 +91,6 @@ export async function getStreams() {
 	}
 }
 
-export type MappedStream = Unpacked<ReturnType<typeof mapRawStream>>;
-
 function mapRawStream(stream: RawStream) {
 	return {
 		thumbnailUrl: stream.thumbnail_url,
@@ -104,7 +101,7 @@ function mapRawStream(stream: RawStream) {
 
 const SPLATOON_3_TWITCH_GAME_ID = "1158884259";
 async function getAllStreams() {
-	if (process.env.NODE_ENV === "test") return [];
+	if (process.env.NODE_ENV === "test" || IS_E2E_TEST_RUN) return [];
 
 	const result: RawStream[] = [];
 
@@ -114,7 +111,7 @@ async function getAllStreams() {
 		if (count === 50) {
 			throw new Error("Stuck getting streams");
 		}
-		const { data, pagination } = await getStreamsChunk({ cursor });
+		const { data, pagination } = await getStreamsChunk(cursor);
 
 		result.push(
 			// filter to ensure each streamer appears only once
@@ -134,38 +131,12 @@ async function getAllStreams() {
 	}
 }
 
-export async function getStreamsChunk({
-	isRetry = false,
-	cursor,
-}: {
-	isRetry?: boolean;
-	cursor?: string;
-}): Promise<StreamsResponse> {
-	const { TWITCH_CLIENT_ID } = getTwitchEnvVars();
-	const token = await getToken();
-
-	const res = await fetch(
+async function getStreamsChunk(cursor?: string): Promise<StreamsResponse> {
+	const res = await twitchFetch(
 		`https://api.twitch.tv/helix/streams?game_id=${SPLATOON_3_TWITCH_GAME_ID}&first=100&after=${
 			cursor ?? ""
 		}`,
-		{
-			headers: [
-				["Authorization", `Bearer ${token}`],
-				["Client-Id", TWITCH_CLIENT_ID],
-			],
-		},
 	);
-
-	if (res.status === 401 && !isRetry) {
-		purgeCachedToken();
-		return getStreamsChunk({ isRetry: true, cursor });
-	}
-
-	if (!res.ok) {
-		throw new Error(
-			`Getting Twitch token failed with status code: ${res.status}`,
-		);
-	}
 
 	const parsed = streamsSchema.safeParse(await res.json());
 	if (!parsed.success) {

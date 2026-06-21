@@ -1,15 +1,22 @@
-import { useFetcher } from "@remix-run/react";
 import clsx from "clsx";
 import { sub } from "date-fns";
+import { Check } from "lucide-react";
 import * as React from "react";
+import { useFetcher } from "react-router";
 import { LinkButton, SendouButton } from "~/components/elements/Button";
 import { SendouPopover } from "~/components/elements/Popover";
-import { CheckmarkIcon } from "~/components/icons/Checkmark";
+import { LocaleTimeRange } from "~/components/LocaleTimeRange";
 import { SubmitButton } from "~/components/SubmitButton";
 import { useUser } from "~/features/auth/core/user";
+import { soundEnabled, soundVolume } from "~/features/chat/chat-utils";
 import { useTournament } from "~/features/tournament/routes/to.$id";
 import { logger } from "~/utils/logger";
-import { tournamentMatchPage, tournamentRegisterPage } from "~/utils/urls";
+import {
+	soundPath,
+	tournamentMatchPage,
+	tournamentRegisterPage,
+} from "~/utils/urls";
+import styles from "../tournament-bracket.module.css";
 
 export function TournamentTeamActions() {
 	const tournament = useTournament();
@@ -17,6 +24,8 @@ export function TournamentTeamActions() {
 	const fetcher = useFetcher();
 
 	const status = tournament.teamMemberOfProgressStatus(user);
+
+	useMatchReadySound(status?.type);
 
 	if (!status) return null;
 
@@ -94,18 +103,18 @@ export function TournamentTeamActions() {
 						</SubmitButton>
 					</fetcher.Form>
 				) : bracket.startTime && bracket.startTime > new Date() ? (
-					<span className="text-lighter text-xxs" suppressHydrationWarning>
+					<span className="text-lighter text-xxs">
 						open{" "}
-						{sub(bracket.startTime, { hours: 1 }).toLocaleTimeString("en-US", {
-							hour: "numeric",
-							minute: "numeric",
-							weekday: "short",
-						})}{" "}
-						-{" "}
-						{bracket.startTime.toLocaleTimeString("en-US", {
-							hour: "numeric",
-							minute: "numeric",
-						})}
+						<LocaleTimeRange
+							from={sub(bracket.startTime, { hours: 1 })}
+							to={bracket.startTime}
+							options={{
+								hour: "numeric",
+								minute: "numeric",
+								weekday: "short",
+							}}
+							inline
+						/>
 					</span>
 				) : bracket.startTime && bracket.startTime < new Date() ? (
 					<span className="text-warning">over</span>
@@ -144,7 +153,7 @@ export function TournamentTeamActions() {
 	if (status.type === "WAITING_FOR_BRACKET") {
 		return (
 			<Container spaced>
-				<CheckmarkIcon className="tournament-bracket__quick-action__checkmark" />{" "}
+				<Check className={styles.quickActionCheckmark} />{" "}
 				<div>
 					Checked in, waiting on bracket
 					<Dots />
@@ -170,9 +179,9 @@ function Container({
 }) {
 	return (
 		<div
-			className={clsx("tournament-bracket__quick-action", {
-				"tournament-bracket__quick-action__spaced": spaced,
-				"tournament-bracket__quick-action__very-spaced": spaced === "very",
+			className={clsx(styles.quickAction, {
+				[styles.quickActionSpaced]: spaced,
+				[styles.quickActionVerySpaced]: spaced === "very",
 			})}
 		>
 			{children}
@@ -189,7 +198,7 @@ function Dots() {
 		}, 1500);
 
 		return () => {
-			clearTimeout(timeout);
+			clearInterval(timeout);
 		};
 	}, []);
 
@@ -198,4 +207,26 @@ function Dots() {
 			..<span className={clsx({ invisible: !thirdVisible })}>.</span>
 		</span>
 	);
+}
+
+function useMatchReadySound(statusType?: string) {
+	const isWaiting = React.useRef(false);
+
+	React.useEffect(() => {
+		if (statusType === "MATCH" && isWaiting.current) {
+			const sound = "tournament_match";
+
+			if (soundEnabled(sound)) {
+				const audio = new Audio(soundPath(sound));
+				audio.volume = soundVolume() / 100;
+				void audio
+					.play()
+					.catch((e) => logger.error(`Couldn't play sound: ${e}`));
+			}
+		}
+
+		isWaiting.current = !statusType || statusType?.startsWith("WAITING_");
+	}, [statusType]);
+
+	return isWaiting;
 }

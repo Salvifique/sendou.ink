@@ -1,4 +1,4 @@
-import { FF_SCRIMS_ENABLED } from "~/features/scrims/scrims-constants";
+import { Config } from "~/config";
 
 export const navItems = [
 	{
@@ -6,7 +6,7 @@ export const navItems = [
 		url: "settings",
 		prefetch: true,
 	},
-	import.meta.env.VITE_SHOW_LUTI_NAV_ITEM === "true"
+	Config.showLutiNavItem
 		? {
 				name: "luti",
 				url: "luti",
@@ -24,6 +24,11 @@ export const navItems = [
 		prefetch: true,
 	},
 	{
+		name: "comp-analyzer",
+		url: "comp-analyzer",
+		prefetch: true,
+	},
+	{
 		name: "builds",
 		url: "builds",
 		prefetch: true,
@@ -38,13 +43,11 @@ export const navItems = [
 		url: "leaderboards",
 		prefetch: false,
 	},
-	FF_SCRIMS_ENABLED
-		? {
-				name: "scrims",
-				url: "scrims",
-				prefetch: false,
-			}
-		: null,
+	{
+		name: "scrims",
+		url: "scrims",
+		prefetch: false,
+	},
 	{
 		name: "lfg",
 		url: "lfg",
@@ -71,11 +74,6 @@ export const navItems = [
 		prefetch: false,
 	},
 	{
-		name: "u",
-		url: "u",
-		prefetch: false,
-	},
-	{
 		name: "xsearch",
 		url: "xsearch",
 		prefetch: false,
@@ -96,8 +94,8 @@ export const navItems = [
 		prefetch: false,
 	},
 	{
-		name: "t",
-		url: "t",
+		name: "tier-list-maker",
+		url: "tier-list-maker",
 		prefetch: false,
 	},
 	{

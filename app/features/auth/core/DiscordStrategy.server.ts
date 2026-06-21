@@ -1,8 +1,12 @@
+import { add } from "date-fns";
 import { OAuth2Strategy } from "remix-auth-oauth2";
-import { z } from "zod/v4";
+import { z } from "zod";
+import { Config } from "~/config";
+import { ServerConfig } from "~/config.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
-import invariant from "~/utils/invariant";
 import { logger } from "~/utils/logger";
+
+let discordApiCooldownUntil: number | null = null;
 
 const partialDiscordUserSchema = z.object({
 	avatar: z.string().nullish(),
@@ -25,11 +29,23 @@ const discordUserDetailsSchema = z.tuple([
 	partialDiscordUserSchema,
 	partialDiscordConnectionsSchema,
 ]);
+const discordRateLimitSchema = z.object({
+	retry_after: z.number(),
+});
 
 export const DiscordStrategy = () => {
-	const envVars = authEnvVars();
+	const jsonIfOk = async (res: Response) => {
+		if (res.status === 429) {
+			const body = discordRateLimitSchema.safeParse(await res.clone().json());
+			const retryAfterSeconds = body.success ? body.data.retry_after : 60;
+			discordApiCooldownUntil = add(new Date(), {
+				seconds: retryAfterSeconds,
+			}).getTime();
+			logger.warn(
+				`Discord API rate limited, cooldown for ${retryAfterSeconds}s${body.success ? "" : " (failed to parse retry_after)"}`,
+			);
+		}
 
-	const jsonIfOk = (res: Response) => {
 		if (!res.ok) {
 			throw new Error(
 				`Auth related call failed with status code ${res.status}`,
@@ -40,6 +56,10 @@ export const DiscordStrategy = () => {
 	};
 
 	const fetchProfileViaDiscordApi = (token: string) => {
+		if (discordApiCooldownUntil && Date.now() < discordApiCooldownUntil) {
+			throw new Error("Discord API is rate limited");
+		}
+
 		const authHeader: [string, string] = ["Authorization", `Bearer ${token}`];
 
 		return Promise.all([
@@ -54,12 +74,12 @@ export const DiscordStrategy = () => {
 
 	return new OAuth2Strategy(
 		{
-			clientId: envVars.DISCORD_CLIENT_ID,
-			clientSecret: envVars.DISCORD_CLIENT_SECRET,
+			clientId: ServerConfig.discord.clientId,
+			clientSecret: ServerConfig.discord.clientSecret,
 
 			authorizationEndpoint: "https://discord.com/api/oauth2/authorize",
 			tokenEndpoint: "https://discord.com/api/oauth2/token",
-			redirectURI: new URL("/auth/callback", envVars.BASE_URL).toString(),
+			redirectURI: new URL("/auth/callback", Config.siteDomain).toString(),
 
 			scopes: ["identify", "connections", "email"],
 		},
@@ -92,7 +112,7 @@ export const DiscordStrategy = () => {
 				return userFromDb.id;
 			} catch (e) {
 				logger.error("Failed to finish authentication:\n", e);
-				throw new Error("Failed to finish authentication");
+				throw e;
 			}
 		},
 	);
@@ -129,25 +149,4 @@ function parseConnections(
 	}
 
 	return result;
-}
-
-function authEnvVars() {
-	if (process.env.NODE_ENV === "production") {
-		invariant(process.env.DISCORD_CLIENT_ID);
-		invariant(process.env.DISCORD_CLIENT_SECRET);
-		invariant(import.meta.env.VITE_SITE_DOMAIN);
-
-		return {
-			DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID,
-			DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
-			BASE_URL: import.meta.env.VITE_SITE_DOMAIN,
-		};
-	}
-
-	// allow running the project in development without setting auth env vars
-	return {
-		DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID ?? "",
-		DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET ?? "",
-		BASE_URL: import.meta.env.VITE_SITE_DOMAIN ?? "",
-	};
 }

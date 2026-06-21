@@ -1,10 +1,9 @@
-import { Link } from "@remix-run/react";
 import { formatDistance } from "date-fns";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { Image } from "~/components/Image";
 import type { LoaderNotification } from "~/components/layout/NotificationPopover";
 import {
-	mapMetaForTranslation,
 	notificationLink,
 	notificationNavIcon,
 } from "~/features/notifications/notifications-utils";
@@ -18,21 +17,25 @@ export function NotificationsList({ children }: { children: React.ReactNode }) {
 
 export function NotificationItem({
 	notification,
+	onClose,
 }: {
 	notification: LoaderNotification;
+	onClose?: () => void;
 }) {
-	const { t, i18n } = useTranslation(["common"]);
+	const { t } = useTranslation(["common"]);
 
 	return (
-		<Link to={notificationLink(notification)} className={styles.item}>
+		<Link
+			to={notificationLink(notification)}
+			className={styles.item}
+			data-testid="notification-item"
+			onClick={onClose}
+		>
 			<NotificationImage notification={notification}>
 				{!notification.seen ? <div className={styles.unseenDot} /> : null}
 			</NotificationImage>
 			<div className={styles.itemHeader}>
-				{t(
-					`common:notifications.text.${notification.type}`,
-					mapMetaForTranslation(notification, i18n.language),
-				)}
+				{t(`common:notifications.text.${notification.type}`, notification.meta)}
 			</div>
 			<div className={styles.timestamp}>
 				{formatDistance(

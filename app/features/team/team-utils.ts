@@ -1,5 +1,6 @@
+import type { MemberRole, MemberRoleType, Tables } from "~/db/tables";
 import type * as TeamRepository from "./TeamRepository.server";
-import { TEAM } from "./team-constants";
+import { NON_PLAYER_TEAM_ROLES, TEAM } from "./team-constants";
 
 export function isTeamOwner({
 	team,
@@ -71,4 +72,55 @@ export function resolveNewOwner(
 	}
 
 	return null;
+}
+
+/**
+ * Resolves how a team member's role should be classified. For custom roles the explicit
+ * `roleType` is authoritative; for predefined roles it is derived from {@link NON_PLAYER_TEAM_ROLES}.
+ * Returns `null` when the member has no role at all (treated as a player by callers).
+ */
+export function getMemberRoleType(member: {
+	role: MemberRole | null;
+	roleType: MemberRoleType | null;
+}): MemberRoleType | null {
+	if (member.roleType) return member.roleType;
+	if (!member.role) return null;
+	return NON_PLAYER_TEAM_ROLES.includes(member.role) ? "OTHER" : "PLAYER";
+}
+
+/**
+ * Returns a list of participant IDs who are considered "substitutes" for a given tournament result,
+ * based on the team's member history and the result's participants.
+ *
+ * A participant is considered a substitute if both:
+ * - They are not a current member (i.e., their `leftAt` is set).
+ * - They are not a past member who was part of the team during the result's start time.
+ */
+export function subsOfResult<T extends { id: number }>(
+	result: { participants: Array<T>; startTime: number },
+	members: Array<Pick<Tables["TeamMember"], "userId" | "createdAt" | "leftAt">>,
+) {
+	const currentMembers = members.filter((member) => !member.leftAt);
+	const pastMembers = members.filter((member) => member.leftAt);
+
+	const subs = result.participants.reduce((acc: Array<T>, cur) => {
+		if (currentMembers.some((member) => member.userId === cur.id)) return acc;
+		if (
+			pastMembers.some(
+				(member) =>
+					member.userId === cur.id &&
+					member.createdAt < result.startTime &&
+					member.leftAt &&
+					member.leftAt > result.startTime,
+			)
+		) {
+			return acc;
+		}
+
+		acc.push(cur);
+
+		return acc;
+	}, []);
+
+	return subs;
 }

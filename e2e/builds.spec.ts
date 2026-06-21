@@ -1,9 +1,18 @@
-import { expect, type Page, test } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { NZAP_TEST_DISCORD_ID, NZAP_TEST_ID } from "~/db/seed/constants";
 import type { GearType } from "~/db/tables";
 import { ADMIN_DISCORD_ID } from "~/features/admin/admin-constants";
-import { impersonate, navigate, seed, selectWeapon } from "~/utils/playwright";
+import { newBuildBaseSchema } from "~/features/user-page/user-page-schemas";
+import invariant from "~/utils/invariant";
 import { BUILDS_PAGE, userBuildsPage, userNewBuildPage } from "~/utils/urls";
+import {
+	expect,
+	impersonate,
+	navigate,
+	seed,
+	test,
+} from "./helpers/playwright";
+import { createFormHelpers } from "./helpers/playwright-form";
 
 test.describe("Builds", () => {
 	test("adds a build", async ({ page }) => {
@@ -14,17 +23,9 @@ test.describe("Builds", () => {
 			url: userNewBuildPage({ discordId: NZAP_TEST_DISCORD_ID }),
 		});
 
-		await selectWeapon({
-			testId: "weapon-0",
-			name: "Tenta Brella",
-			page,
-		});
-		await page.getByTestId("add-weapon-button").click();
-		await selectWeapon({
-			testId: "weapon-1",
-			name: "Splat Brella",
-			page,
-		});
+		const form = createFormHelpers(page, newBuildBaseSchema);
+
+		await form.selectWeapons("weapons", ["Tenta Brella", "Splat Brella"]);
 
 		await selectGear({
 			type: "HEAD",
@@ -46,11 +47,11 @@ test.describe("Builds", () => {
 			await page.getByTestId("ISM-ability-button").click();
 		}
 
-		await page.getByLabel("Title").fill("Test Build");
-		await page.getByLabel("Description").fill("Test Description");
-		await page.getByTestId("SZ-checkbox").click();
+		await form.fill("title", "Test Build");
+		await form.fill("description", "Test Description");
+		await form.checkItems("modes", ["TC"]);
 
-		await page.getByTestId("submit-button").click();
+		await form.submit();
 
 		await expect(page.getByTestId("change-sorting-button")).toBeVisible();
 
@@ -75,23 +76,37 @@ test.describe("Builds", () => {
 			url: userBuildsPage({ discordId: ADMIN_DISCORD_ID }),
 		});
 
+		const buildIdBefore = await buildIdFromEditLink(
+			page.getByTestId("edit-build").first(),
+		);
+
 		await page.getByTestId("edit-build").first().click();
 
-		await page.getByLabel("Private").click();
+		const form = createFormHelpers(page, newBuildBaseSchema);
+		await form.check("private");
 
-		await page.getByTestId("submit-button").click();
+		await form.submit();
 
-		await expect(page.getByTestId("builds-tab")).toContainText("Builds (50)");
+		await expect(page.getByTestId("user-builds-tab")).toContainText(
+			"Builds (50)",
+		);
 		await expect(page.getByTestId("build-card").first()).toContainText(
 			"Private",
 		);
+
+		const buildIdAfter = await buildIdFromEditLink(
+			page.getByTestId("edit-build").first(),
+		);
+		expect(buildIdAfter).toBe(buildIdBefore);
 
 		await impersonate(page, NZAP_TEST_ID);
 		await navigate({
 			page,
 			url: userBuildsPage({ discordId: ADMIN_DISCORD_ID }),
 		});
-		await expect(page.getByTestId("builds-tab")).toContainText("Builds (49)");
+		await expect(page.getByTestId("user-builds-tab")).toContainText(
+			"Builds (49)",
+		);
 		await expect(page.getByTestId("build-card").first()).not.toContainText(
 			"Private",
 		);
@@ -128,6 +143,7 @@ test.describe("Builds", () => {
 		await page.getByLabel("Tower Control").click();
 		await expect(page.getByTestId("build-mode-TC")).toHaveCount(24);
 		await page.getByTestId("delete-filter-button").click();
+		await expect(page.getByTestId("build-card").first()).toBeVisible();
 
 		//
 		// date filter
@@ -156,4 +172,12 @@ async function selectGear({
 		.getByRole("listbox", { name: "Suggestions" })
 		.getByTestId(`gear-select-option-${name}`)
 		.click();
+}
+
+async function buildIdFromEditLink(locator: Locator) {
+	const href = await locator.getAttribute("href");
+	invariant(href, "edit-build link missing href");
+	const match = href.match(/buildId=(\d+)/);
+	invariant(match, `buildId not found in href: ${href}`);
+	return Number(match[1]);
 }

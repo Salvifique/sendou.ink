@@ -16,10 +16,15 @@ import {
 	specialWeaponIds,
 	subWeaponIds,
 	weaponCategories,
+	weaponIdToBaseWeaponId,
 } from "~/modules/in-game-lists/weapon-ids";
 import invariant from "~/utils/invariant";
 import type { Unpacked } from "~/utils/types";
-import { UNKNOWN_SHORT } from "../analyzer-constants";
+import {
+	MAIN_SLOT_AP,
+	SUB_SLOT_AP,
+	UNKNOWN_SHORT,
+} from "../analyzer-constants";
 import type {
 	AbilityPoints,
 	AnalyzedBuild,
@@ -30,11 +35,20 @@ import type {
 	SubWeaponDamage,
 	SubWeaponParams,
 } from "../analyzer-types";
-import { abilityValues as abilityValuesJson } from "./ability-values";
-import { weaponParams as rawWeaponParams } from "./weapon-params";
+import { abilityValues as abilityValuesJson } from "../data/ability-values";
+import { weaponParams as rawWeaponParams } from "../data/weapon-params";
 
 export function weaponParams(): ParamsJson {
-	return rawWeaponParams as ParamsJson;
+	return rawWeaponParams as unknown as ParamsJson;
+}
+
+export function mainWeaponParams(weaponId: MainWeaponId): MainWeaponParams {
+	const params = rawWeaponParams as unknown as ParamsJson;
+	const baseId = weaponIdToBaseWeaponId(weaponId);
+	const baseStats = params.baseWeaponStats[baseId];
+	const kit = params.weaponKits[weaponId];
+
+	return { ...baseStats, ...kit } as MainWeaponParams;
 }
 
 export function buildToAbilityPoints(build: BuildAbilitiesTupleWithUnknown) {
@@ -50,7 +64,7 @@ export function buildToAbilityPoints(build: BuildAbilitiesTupleWithUnknown) {
 				continue;
 			}
 
-			const aps = i === 0 ? 10 : 3;
+			const aps = i === 0 ? MAIN_SLOT_AP : SUB_SLOT_AP;
 			const apsDoubled = aps * (abilityDoublerActive ? 2 : 1);
 			const newAp = (result.get(ability) ?? 0) + apsDoubled;
 
@@ -208,9 +222,8 @@ export function validatedAnyWeaponFromSearchParams(
 		const id = Number(rawWeapon.replace("SPECIAL_", ""));
 
 		if (
-			!specialWeaponIds
-				.filter((id) => !nonDamagingSpecialWeaponIds.includes(id))
-				.includes(id as any)
+			!specialWeaponIds.includes(id as any) ||
+			nonDamagingSpecialWeaponIds.includes(id)
 		) {
 			return DEFAULT_ANY_WEAPON;
 		}
@@ -228,12 +241,15 @@ export function validatedAnyWeaponFromSearchParams(
 		return { type: "MAIN", id: id as MainWeaponId };
 	}
 
-	return { type: "MAIN", id: validatedWeaponIdFromSearchParams(searchParams) };
+	return {
+		type: "MAIN",
+		id: validatedWeaponIdFromSearchParams(searchParams) ?? 0,
+	};
 }
 
 export function validatedWeaponIdFromSearchParams(
 	searchParams: URLSearchParams,
-): MainWeaponId {
+) {
 	const weaponId = searchParams.get("weapon")
 		? Number(searchParams.get("weapon"))
 		: null;
@@ -242,7 +258,7 @@ export function validatedWeaponIdFromSearchParams(
 		return weaponId as MainWeaponId;
 	}
 
-	return weaponCategories[0].weaponIds[0];
+	return null;
 }
 
 function validateAbility(
@@ -329,3 +345,32 @@ export function damageIsSubWeaponDamage(
 ): damage is Unpacked<AnalyzedBuild["stats"]["subWeaponDefenseDamages"]> {
 	return typeof (damage as SubWeaponDamage).subWeaponId === "number";
 }
+
+const rawMultiShot: Partial<Record<MainWeaponId, number>> = {
+	// L-3
+	300: 3,
+	// H-3
+	310: 3,
+	// Tri-Stringer,
+	7010: 3,
+	// REEF-LUX,
+	7020: 3,
+	// Wellstring V,
+	7030: 5,
+	// Bloblobber
+	3030: 4,
+	// Dread Winger
+	3050: 2,
+};
+
+/**
+ * Returns the multi-shot count for a given weapon ID. Multi-shot refers to the number of projectiles fired in a single shot,
+ * e.g. H-3 Nozzlenose fires 3 projectiles per one trigger press.
+ *
+ * @returns The multi-shot count associated with the weapon, or `undefined` if not found.
+ */
+export const weaponIdToMultiShotCount = (weaponId: MainWeaponId) => {
+	return rawMultiShot[
+		weaponIdToBaseWeaponId(weaponId) as keyof typeof rawMultiShot
+	];
+};

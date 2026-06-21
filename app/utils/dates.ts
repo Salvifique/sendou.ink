@@ -1,7 +1,60 @@
-import { CalendarDateTime, parseDate } from "@internationalized/date";
-import { getWeek } from "date-fns";
+import {
+	CalendarDate,
+	CalendarDateTime,
+	parseDate,
+} from "@internationalized/date";
+import type { Locale } from "date-fns";
+import { formatDistanceToNow as dateFnsFormatDistanceToNow } from "date-fns";
+import { da } from "date-fns/locale/da";
+import { de } from "date-fns/locale/de";
+import { enUS } from "date-fns/locale/en-US";
+import { es } from "date-fns/locale/es";
+import { fr } from "date-fns/locale/fr";
+import { frCA } from "date-fns/locale/fr-CA";
+import { he } from "date-fns/locale/he";
+import { it } from "date-fns/locale/it";
+import { ja } from "date-fns/locale/ja";
+import { ko } from "date-fns/locale/ko";
+import { nl } from "date-fns/locale/nl";
+import { pl } from "date-fns/locale/pl";
+import { ptBR } from "date-fns/locale/pt-BR";
+import { ru } from "date-fns/locale/ru";
+import { zhCN } from "date-fns/locale/zh-CN";
 import type { MonthYear } from "~/features/plus-voting/core";
+import type { LanguageCode } from "~/modules/i18n/config";
 import type { DayMonthYear } from "./zod";
+
+const LOCALE_MAP: Record<LanguageCode, Locale> = {
+	da,
+	de,
+	en: enUS,
+	"es-ES": es,
+	"es-US": es,
+	"fr-CA": frCA,
+	"fr-EU": fr,
+	he,
+	it,
+	ja,
+	ko,
+	nl,
+	pl,
+	"pt-BR": ptBR,
+	ru,
+	zh: zhCN,
+};
+
+export function formatDistanceToNow(
+	date: Parameters<typeof dateFnsFormatDistanceToNow>[0],
+	options: Omit<
+		NonNullable<Parameters<typeof dateFnsFormatDistanceToNow>[1]>,
+		"locale"
+	> & { language: LanguageCode },
+) {
+	return dateFnsFormatDistanceToNow(date, {
+		...options,
+		locale: LOCALE_MAP[options.language],
+	});
+}
 
 export function databaseTimestampToDate(timestamp: number) {
 	return new Date(databaseTimestampToJavascriptTimestamp(timestamp));
@@ -41,6 +94,17 @@ export function dateToDateValue(date: Date) {
 }
 
 /**
+ * Converts a JavaScript Date object into a CalendarDate object (used by react-aria-components for date-only pickers).
+ */
+export function dateToCalendarDate(date: Date) {
+	return new CalendarDate(
+		date.getFullYear(),
+		date.getMonth() + 1,
+		date.getDate(),
+	);
+}
+
+/**
  * Converts a date represented by day, month, and year into a DateValue object (used by react-aria-components), noon UTC.
  */
 export function dayMonthYearToDateValue({ day, month, year }: DayMonthYear) {
@@ -56,44 +120,6 @@ export function dayMonthYearToDatabaseTimestamp(args: DayMonthYear) {
 	return dateToDatabaseTimestamp(dayMonthYearToDate(args));
 }
 
-export function databaseCreatedAt() {
-	return dateToDatabaseTimestamp(new Date());
-}
-
-export function dateToWeekNumber(date: Date) {
-	return getWeek(date, { weekStartsOn: 1, firstWeekContainsDate: 4 });
-}
-
-export function dateToThisWeeksMonday(date: Date) {
-	const copiedDate = new Date(date.getTime());
-
-	while (copiedDate.getDay() !== 1) {
-		copiedDate.setDate(copiedDate.getDate() - 1);
-	}
-
-	return copiedDate;
-}
-
-export function dateToThisWeeksSunday(date: Date) {
-	const copiedDate = new Date(date.getTime());
-
-	while (copiedDate.getDay() !== 0) {
-		copiedDate.setDate(copiedDate.getDate() + 1);
-	}
-
-	return copiedDate;
-}
-
-export function getWeekStartsAtMondayDay(date: Date) {
-	const currentDay = date.getDay();
-
-	return dayToWeekStartsAtMondayDay(currentDay);
-}
-
-export function dayToWeekStartsAtMondayDay(day: number) {
-	return day === 0 ? 7 : day;
-}
-
 // https://stackoverflow.com/a/71336659
 export function weekNumberToDate({
 	week,
@@ -107,13 +133,34 @@ export function weekNumberToDate({
 }) {
 	const result = new Date(Date.UTC(year, 0, 4));
 
-	result.setDate(
-		result.getDate() - (result.getDay() || 7) + 1 + 7 * (week - 1),
+	result.setUTCDate(
+		result.getUTCDate() - (result.getUTCDay() || 7) + 1 + 7 * (week - 1),
 	);
 	if (position === "end") {
-		result.setDate(result.getDate() + 6);
+		result.setUTCDate(result.getUTCDate() + 6);
 	}
 	return result;
+}
+
+/**
+ * Returns the UTC date range covering an ISO week: the Monday that starts the
+ * week and the Monday that starts the following week (a 7-day span). Uses UTC
+ * date arithmetic so the span is exactly 7×24h regardless of the server's
+ * timezone or any DST transition that falls inside the week.
+ */
+export function weekNumberToDateRange({
+	week,
+	year,
+}: {
+	week: number;
+	year: number;
+}) {
+	const startTime = weekNumberToDate({ week, year });
+
+	const endTime = new Date(startTime);
+	endTime.setUTCDate(endTime.getUTCDate() + 7);
+
+	return { startTime, endTime };
 }
 
 /**
@@ -146,44 +193,22 @@ export function dateToYearMonthDayHourMinuteString(date: Date) {
 	)}:${prefixZero(minute)}`;
 }
 
-/** Returns date as a string with the format YYYY-MM-DD in user's time zone */
-export function dateToYearMonthDayString(date: Date) {
-	const copiedDate = new Date(date.getTime());
-
-	if (!isValidDate(copiedDate)) {
-		throw new Error("tried to format string from invalid date");
-	}
-
-	const year = copiedDate.getFullYear();
-	const month = copiedDate.getMonth() + 1;
-	const day = copiedDate.getDate();
-
-	return `${year}-${prefixZero(month)}-${prefixZero(day)}`;
-}
-
 function prefixZero(number: number) {
 	return number < 10 ? `0${number}` : number;
 }
 
-/**
- * Retrieves a new Date object that is offset by several hours.
- *
- * NOTE: it is important that we work with & return a copy of the date here,
- *  otherwise we will just be mutating the original date passed into this function.
- */
-export function getDateWithHoursOffset(date: Date, hoursOffset: number) {
-	const copiedDate = new Date(date.getTime());
-	copiedDate.setHours(date.getHours() + hoursOffset);
-	return copiedDate;
-}
-
 export function getDateAtNextFullHour(date: Date) {
 	const copiedDate = new Date(date.getTime());
-	if (date.getMinutes() > 0) {
+	if (
+		date.getMinutes() > 0 ||
+		date.getSeconds() > 0 ||
+		date.getMilliseconds() > 0
+	) {
 		copiedDate.setHours(date.getHours() + 1);
 		copiedDate.setMinutes(0);
 	}
 	copiedDate.setSeconds(0);
+	copiedDate.setMilliseconds(0);
 	return copiedDate;
 }
 

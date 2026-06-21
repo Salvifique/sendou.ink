@@ -1,19 +1,19 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
-import { useFetcher, useLoaderData } from "@remix-run/react";
+import clsx from "clsx";
 import { add, sub } from "date-fns";
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { AddNewButton } from "~/components/AddNewButton";
+import type { MetaFunction } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { Alert } from "~/components/Alert";
 import { Main } from "~/components/Main";
 import { SubmitButton } from "~/components/SubmitButton";
 import { useUser } from "~/features/auth/core/user";
 import { useSearchParamStateEncoder } from "~/hooks/useSearchParamState";
 import { databaseTimestampToDate } from "~/utils/dates";
-import { metaTags } from "~/utils/remix";
+import { metaTags, type SerializeFrom } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import type { Unpacked } from "~/utils/types";
-import { LFG_PAGE, lfgNewPostPage, navIconUrl } from "~/utils/urls";
+import { LFG_PAGE, navIconUrl } from "~/utils/urls";
 import { action } from "../actions/lfg.server";
 import { LFGAddFilterButton } from "../components/LFGAddFilterButton";
 import { LFGFilters } from "../components/LFGFilters";
@@ -26,7 +26,9 @@ import {
 	smallStrToFilter,
 } from "../lfg-types";
 import { loader } from "../loaders/lfg.server";
-export { loader, action };
+import styles from "./lfg.module.css";
+
+export { action, loader };
 
 export const handle: SendouRouteHandle = {
 	i18n: ["lfg"],
@@ -103,12 +105,11 @@ export default function LFGPage() {
 
 	return (
 		<Main className="stack xl">
-			<div className="stack sm horizontal justify-end">
+			<div className={styles.topRow}>
 				<LFGAddFilterButton
 					addFilter={(newFilter) => setFilters([...filters, newFilter])}
 					filters={filters}
 				/>
-				<AddNewButton navIcon="lfg" to={lfgNewPostPage()} />
 			</div>
 			<LFGFilters
 				filters={filters}
@@ -124,7 +125,11 @@ export default function LFGPage() {
 				}
 			/>
 			{filteredPosts.map((post) => (
-				<div key={post.id} className="stack sm">
+				<div
+					key={post.id}
+					id={String(post.id)}
+					className={clsx("stack sm", styles.post)}
+				>
 					{showExpiryAlert(post) ? <PostExpiryAlert postId={post.id} /> : null}
 					<LFGPost post={post} tiersMap={tiersMap} />
 				</div>

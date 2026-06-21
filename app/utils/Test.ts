@@ -1,16 +1,46 @@
-import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
-import type { Params } from "@remix-run/react";
+import type {
+	ActionFunctionArgs,
+	LoaderFunctionArgs,
+	Params,
+} from "react-router";
 import { expect } from "vitest";
-import type { z } from "zod/v4";
+import type { z } from "zod";
 import { REGULAR_USER_TEST_ID } from "~/db/seed/constants";
 import { db, sql } from "~/db/sql";
 import { ADMIN_ID } from "~/features/admin/admin-constants";
 import { SESSION_KEY } from "~/features/auth/core/authenticator.server";
 import { authSessionStorage } from "~/features/auth/core/session.server";
+import {
+	type AuthenticatedUser,
+	getUserFromRequest,
+	userAsyncLocalStorage,
+} from "~/features/auth/core/user-context.server";
+import { logger } from "./logger";
 
 export function arrayContainsSameItems<T>(arr1: T[], arr2: T[]) {
 	return (
 		arr1.length === arr2.length && arr1.every((item) => arr2.includes(item))
+	);
+}
+
+/**
+ * Runs `fn` inside the user AsyncLocalStorage store so that repository functions
+ * resolving the actor via `actorId()` / `actorIdOrNull()` see `user` as the acting
+ * user. Use in direct repository unit tests, which run outside a request.
+ */
+export function withUser<T>(user: AuthenticatedUser, fn: () => T): T {
+	return userAsyncLocalStorage.run({ user }, fn);
+}
+
+/**
+ * Like {@link withUser} but takes only a user id, building a minimal acting-user
+ * context. Convenient for repository data-setup in tests where only the actor's id
+ * matters (repositories read the actor solely via `actorId()` / `actorIdOrNull()`).
+ */
+export function withUserId<T>(id: number, fn: () => T): T {
+	return userAsyncLocalStorage.run(
+		{ user: { id } as unknown as AuthenticatedUser },
+		fn,
 	);
 }
 
@@ -28,11 +58,10 @@ export function arrayContainsSameItems<T>(arr1: T[], arr2: T[]) {
 export function wrappedAction<T extends z.ZodTypeAny>({
 	action,
 	/** Is this action submitted as json (via SendouForm) */
-	isNewForm = false,
+	isJsonSubmission = false,
 }: {
-	// TODO: strongly type this
 	action: (args: ActionFunctionArgs) => any;
-	isNewForm?: boolean;
+	isJsonSubmission?: boolean;
 }) {
 	return async (
 		args: z.infer<T>,
@@ -41,7 +70,7 @@ export function wrappedAction<T extends z.ZodTypeAny>({
 			params = {},
 		}: { user?: "admin" | "regular"; params?: Params<string> } = {},
 	) => {
-		const body = isNewForm
+		const body = isJsonSubmission
 			? JSON.stringify(args)
 			: new URLSearchParams(args as any);
 		const request = new Request("http://app.com/path", {
@@ -51,36 +80,49 @@ export function wrappedAction<T extends z.ZodTypeAny>({
 				...(await authHeader(user)),
 				[
 					"Content-Type",
-					isNewForm ? "application/json" : "application/x-www-form-urlencoded",
+					isJsonSubmission
+						? "application/json"
+						: "application/x-www-form-urlencoded",
 				],
 			],
 		});
 
-		try {
-			const response = await action({
-				request,
-				context: {},
-				params,
-			});
+		const userFromRequest = await getUserFromRequest(
+			request,
+			new URL(request.url),
+		);
 
-			return response;
-		} catch (thrown) {
-			if (thrown instanceof Response) {
-				// it was a redirect
-				if (thrown.status === 302) return thrown;
+		return userAsyncLocalStorage.run({ user: userFromRequest }, async () => {
+			try {
+				const response = await action({
+					request,
+					context: {} as any,
+					params,
+					pattern: "",
+					url: new URL(request.url),
+				});
 
-				throw new Error(`Response thrown with status code: ${thrown.status}`);
+				return response;
+			} catch (thrown) {
+				// we only log errors in vitest for failed tests so this is okay (more context)
+				logger.error("Error in wrappedAction:", thrown);
+
+				if (thrown instanceof Response) {
+					// it was a redirect
+					if (thrown.status === 302) return thrown;
+
+					throw new Error(`Response thrown with status code: ${thrown.status}`);
+				}
+
+				throw thrown;
 			}
-
-			throw thrown;
-		}
+		});
 	};
 }
 
 export function wrappedLoader<T>({
 	loader,
 }: {
-	// TODO: strongly type this
 	loader: (args: LoaderFunctionArgs) => any;
 }) {
 	return async ({
@@ -98,21 +140,30 @@ export function wrappedLoader<T>({
 			],
 		});
 
-		try {
-			const data = await loader({
-				request,
-				params,
-				context: {},
-			});
+		const userFromRequest = await getUserFromRequest(
+			request,
+			new URL(request.url),
+		);
 
-			return data as T;
-		} catch (thrown) {
-			if (thrown instanceof Response) {
-				throw new Error(`Response thrown with status code: ${thrown.status}`);
+		return userAsyncLocalStorage.run({ user: userFromRequest }, async () => {
+			try {
+				const data = await loader({
+					request,
+					params,
+					context: {} as any,
+					pattern: "",
+					url: new URL(request.url),
+				});
+
+				return data as T;
+			} catch (thrown) {
+				if (thrown instanceof Response) {
+					throw new Error(`Response thrown with status code: ${thrown.status}`);
+				}
+
+				throw thrown;
 			}
-
-			throw thrown;
-		}
+		});
 	};
 }
 
@@ -123,6 +174,10 @@ export function wrappedLoader<T>({
  * @param message - Optional. The expected error toast message shown to the user.
  */
 export function assertResponseErrored(response: Response, message?: string) {
+	if (!response) {
+		throw new Error(`Expected a Response, got: ${response}`);
+	}
+
 	expect(response.headers.get("Location")).toContain("?__error=");
 	if (message) {
 		expect(response.headers.get("Location")).toContain(message);
@@ -159,9 +214,20 @@ async function authHeader(
  * });
  */
 export const dbReset = () => {
+	// virtual tables and their shadow tables (e.g. UserSearch_data) can not be
+	// deleted from directly; the fts index stays in sync via the User triggers
 	const tables = sql
 		.prepare(
-			"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'migrations';",
+			`SELECT name FROM sqlite_master
+			WHERE type='table'
+			AND name NOT LIKE 'sqlite_%'
+			AND name NOT LIKE 'migrations'
+			AND sql NOT LIKE 'CREATE VIRTUAL TABLE%'
+			AND NOT EXISTS (
+				SELECT 1 FROM sqlite_master AS vt
+				WHERE vt.sql LIKE 'CREATE VIRTUAL TABLE%'
+				AND sqlite_master.name LIKE vt.name || '_%'
+			);`,
 		)
 		.all() as { name: string }[];
 

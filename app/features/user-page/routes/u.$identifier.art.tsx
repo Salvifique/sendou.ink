@@ -1,16 +1,17 @@
-import { useLoaderData, useMatches } from "@remix-run/react";
 import { useTranslation } from "react-i18next";
-import { AddNewButton } from "~/components/AddNewButton";
+import { useLoaderData, useMatches } from "react-router";
 import { ART_SOURCES, type ArtSource } from "~/features/art/art-types";
 import { ArtGrid } from "~/features/art/components/ArtGrid";
 import { useUser } from "~/features/auth/core/user";
 import { useSearchParamState } from "~/hooks/useSearchParamState";
 import invariant from "~/utils/invariant";
 import type { SendouRouteHandle } from "~/utils/remix.server";
-import { newArtPage } from "~/utils/urls";
+import { userPage } from "~/utils/urls";
 import { action } from "../actions/u.$identifier.art.server";
+import { SubPageHeader } from "../components/SubPageHeader";
 import { loader } from "../loaders/u.$identifier.art.server";
 import type { UserPageLoaderData } from "../loaders/u.$identifier.server";
+
 export { action, loader };
 
 export const handle: SendouRouteHandle = {
@@ -47,14 +48,15 @@ export default function UserArtPage() {
 				: data.arts.filter((a) => a.author);
 
 	if (filteredTag) {
-		arts = arts.filter((a) => a.tags?.includes(filteredTag));
+		arts = arts.filter((a) => a.tags?.some((tag) => tag.name === filteredTag));
 	}
 
 	return (
 		<div className="stack md">
-			<div className="stack items-end">
-				<AddNewButton navIcon="art" to={newArtPage()} />
-			</div>
+			<SubPageHeader
+				user={layoutData.user}
+				backTo={userPage(layoutData.user)}
+			/>
 			<div className="stack horizontal justify-between items-start text-xs text-lighter">
 				<div>
 					{data.unvalidatedArtCount > 0

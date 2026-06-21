@@ -1,19 +1,18 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { z } from "zod/v4";
+import type { LoaderFunctionArgs } from "react-router";
+import { z } from "zod";
 import { requireUser } from "~/features/auth/core/user.server";
 import { notFoundIfFalsy } from "~/utils/remix.server";
 import { actualNumber, id } from "~/utils/zod";
-import { findVodById } from "../queries/findVodById.server";
+import * as VodRepository from "../VodRepository.server";
 import { canEditVideo, vodToVideoBeingAdded } from "../vods-utils";
 
 const newVodLoaderParamsSchema = z.object({
 	vod: z.preprocess(actualNumber, id),
 });
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-	const user = await requireUser(request);
+export const loader = async ({ url }: LoaderFunctionArgs) => {
+	const user = requireUser();
 
-	const url = new URL(request.url);
 	const params = newVodLoaderParamsSchema.safeParse(
 		Object.fromEntries(url.searchParams),
 	);
@@ -22,7 +21,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		return { vodToEdit: null };
 	}
 
-	const vod = notFoundIfFalsy(findVodById(params.data.vod));
+	const vod = notFoundIfFalsy(await VodRepository.findVodById(params.data.vod));
 	const vodToEdit = vodToVideoBeingAdded(vod);
 
 	if (

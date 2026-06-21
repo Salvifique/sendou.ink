@@ -1,0 +1,7 @@
+.item {
+	min-height: 50px;
+	cursor: move;
+	touch-action: none;
+	user-select: none;
+	-webkit-user-select: none;
+}

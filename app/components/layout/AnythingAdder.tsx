@@ -1,7 +1,6 @@
-import { Button } from "react-aria-components";
+import { Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUser } from "~/features/auth/core/user";
-import { FF_SCRIMS_ENABLED } from "~/features/scrims/scrims-constants";
 import {
 	CALENDAR_NEW_PAGE,
 	lfgNewPostPage,
@@ -11,18 +10,19 @@ import {
 	newAssociationsPage,
 	newScrimPostPage,
 	newVodPage,
+	ORGANIZATION_NEW_PAGE,
 	plusSuggestionsNewPage,
 	TOURNAMENT_NEW_PAGE,
 	userNewBuildPage,
 } from "~/utils/urls";
+import { SendouButton } from "../elements/Button";
 import {
 	SendouMenu,
 	SendouMenuItem,
 	type SendouMenuItemProps,
 } from "../elements/Menu";
-import { PlusIcon } from "../icons/Plus";
 
-export function AnythingAdder() {
+export function AnythingAdder({ compact }: { compact?: boolean }) {
 	const { t } = useTranslation(["common"]);
 	const user = useUser();
 
@@ -36,6 +36,12 @@ export function AnythingAdder() {
 			children: t("header.adder.tournament"),
 			imagePath: navIconUrl("medal"),
 			href: TOURNAMENT_NEW_PAGE,
+		},
+		{
+			id: "organization",
+			children: t("header.adder.organization"),
+			imagePath: navIconUrl("medal"),
+			href: ORGANIZATION_NEW_PAGE,
 		},
 		{
 			id: "calendarEvent",
@@ -55,22 +61,18 @@ export function AnythingAdder() {
 			imagePath: navIconUrl("t"),
 			href: NEW_TEAM_PAGE,
 		},
-		FF_SCRIMS_ENABLED
-			? {
-					id: "scrimPost",
-					children: t("header.adder.scrimPost"),
-					imagePath: navIconUrl("scrims"),
-					href: newScrimPostPage(),
-				}
-			: null,
-		FF_SCRIMS_ENABLED
-			? {
-					id: "association",
-					children: t("header.adder.association"),
-					imagePath: navIconUrl("associations"),
-					href: newAssociationsPage(),
-				}
-			: null,
+		{
+			id: "scrimPost",
+			children: t("header.adder.scrimPost"),
+			imagePath: navIconUrl("scrims"),
+			href: newScrimPostPage(),
+		},
+		{
+			id: "association",
+			children: t("header.adder.association"),
+			imagePath: navIconUrl("associations"),
+			href: newAssociationsPage(),
+		},
 		{
 			id: "lfgPost",
 			children: t("header.adder.lfgPost"),
@@ -99,13 +101,16 @@ export function AnythingAdder() {
 
 	return (
 		<SendouMenu
+			placement="bottom right"
 			trigger={
-				<Button
-					className="layout__header__button"
+				<SendouButton
+					size="small"
+					icon={<Plus />}
+					shape={compact ? "square" : undefined}
 					data-testid="anything-adder-menu-button"
 				>
-					<PlusIcon className="layout__header__button__icon" />
-				</Button>
+					{compact ? undefined : `${t("common:actions.addNew")}…`}
+				</SendouButton>
 			}
 		>
 			{items.map((item) => (

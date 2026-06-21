@@ -1,26 +1,24 @@
-import type { MetaFunction, SerializeFrom } from "@remix-run/node";
+import {
+	Calendar,
+	ChartColumnBig,
+	Flame,
+	FlaskConical,
+	Funnel,
+	Map as MapIcon,
+} from "lucide-react";
+import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
 import {
 	type ShouldRevalidateFunction,
 	useLoaderData,
 	useSearchParams,
-} from "@remix-run/react";
-import { nanoid } from "nanoid";
-import * as React from "react";
-import { useTranslation } from "react-i18next";
+} from "react-router";
 import * as R from "remeda";
 import { BuildCard } from "~/components/BuildCard";
 import { LinkButton, SendouButton } from "~/components/elements/Button";
 import { SendouMenu, SendouMenuItem } from "~/components/elements/Menu";
-import { BeakerFilledIcon } from "~/components/icons/BeakerFilled";
-import { CalendarIcon } from "~/components/icons/Calendar";
-import { ChartBarIcon } from "~/components/icons/ChartBar";
-import { FilterIcon } from "~/components/icons/Filter";
-import { FireIcon } from "~/components/icons/Fire";
-import { MapIcon } from "~/components/icons/Map";
 import { Main } from "~/components/Main";
-import { useUser } from "~/features/auth/core/user";
-import { safeJSONParse } from "~/utils/json";
-import { isRevalidation, metaTags } from "~/utils/remix";
+import { isRevalidation, metaTags, type SerializeFrom } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import type { Unpacked } from "~/utils/types";
 import {
@@ -36,20 +34,85 @@ import {
 	BUILDS_PAGE_MAX_BUILDS,
 	FILTER_SEARCH_PARAM_KEY,
 	MAX_BUILD_FILTERS,
-	PATCHES,
+	RECENT_PATCHES,
 } from "../builds-constants";
-import type { BuildFiltersFromSearchParams } from "../builds-schemas.server";
+import {
+	type BuildFiltersFromSearchParams,
+	buildFiltersSearchParams,
+} from "../builds-schemas";
 import type { AbilityBuildFilter, BuildFilter } from "../builds-types";
 import { FilterSection } from "../components/FilterSection";
 
 import { loader } from "../loaders/builds.$slug.server";
+
 export { loader };
 
 import styles from "./builds.$slug.module.css";
 
-const filterOutMeaninglessFilters = (
-	filter: Unpacked<BuildFiltersFromSearchParams>,
-) => {
+type ParsedFilter = Unpacked<BuildFiltersFromSearchParams>;
+
+/**
+ * Returns true if the meaningful build filters in `next` differ from those in `current`.
+ * Order-insensitive and duplicate-safe; AT_LEAST 0 ability filters are treated as no-ops.
+ */
+export function buildFiltersMeaningfullyChanged(
+	current: URLSearchParams,
+	next: URLSearchParams,
+): boolean {
+	const oldFilters = extractMeaningfulFilters(current);
+	const newFilters = extractMeaningfulFilters(next);
+
+	return !R.isDeepEqual(
+		R.sortBy(oldFilters, filterKey),
+		R.sortBy(newFilters, filterKey),
+	);
+}
+
+export const shouldRevalidate: ShouldRevalidateFunction = (args) => {
+	if (isRevalidation(args)) return true;
+
+	if (args.currentParams.slug !== args.nextParams.slug) {
+		return true;
+	}
+
+	if (
+		args.currentUrl.searchParams.get("limit") !==
+		args.nextUrl.searchParams.get("limit")
+	) {
+		return true;
+	}
+
+	if (
+		buildFiltersMeaningfullyChanged(
+			args.currentUrl.searchParams,
+			args.nextUrl.searchParams,
+		)
+	) {
+		return args.defaultShouldRevalidate;
+	}
+
+	return false;
+};
+
+function parseFiltersFromSearchParams(
+	searchParams: URLSearchParams,
+): BuildFilter[] {
+	const raw = searchParams.get(FILTER_SEARCH_PARAM_KEY);
+	if (!raw) return [];
+
+	const parsed = buildFiltersSearchParams.safeParse(raw);
+	if (!parsed.success || !parsed.data) return [];
+
+	return parsed.data;
+}
+
+function extractMeaningfulFilters(
+	searchParams: URLSearchParams,
+): BuildFiltersFromSearchParams {
+	return parseFiltersFromSearchParams(searchParams).filter(isMeaningfulFilter);
+}
+
+function isMeaningfulFilter(filter: ParsedFilter): boolean {
 	if (filter.type !== "ability") return true;
 
 	return (
@@ -57,74 +120,13 @@ const filterOutMeaninglessFilters = (
 		typeof filter.value !== "number" ||
 		filter.value > 0
 	);
-};
-export const shouldRevalidate: ShouldRevalidateFunction = (args) => {
-	if (isRevalidation(args)) return true;
+}
 
-	const oldLimit = args.currentUrl.searchParams.get("limit");
-	const newLimit = args.nextUrl.searchParams.get("limit");
-
-	// limit was changed -> revalidate
-	if (oldLimit !== newLimit) {
-		return true;
-	}
-
-	const rawOldFilters = args.currentUrl.searchParams.get(
-		FILTER_SEARCH_PARAM_KEY,
-	);
-	const oldFilters = rawOldFilters
-		? safeJSONParse<BuildFiltersFromSearchParams>(rawOldFilters, []).filter(
-				filterOutMeaninglessFilters,
-			)
-		: null;
-	const rawNewFilters = args.nextUrl.searchParams.get(FILTER_SEARCH_PARAM_KEY);
-	const newFilters = rawNewFilters
-		? // no safeJSONParse as the value should be coming from app code and should be trustworthy
-			(JSON.parse(rawNewFilters) as BuildFiltersFromSearchParams).filter(
-				filterOutMeaninglessFilters,
-			)
-		: null;
-
-	// meaningful filter was added/removed -> revalidate
-	if (oldFilters && newFilters && oldFilters.length !== newFilters.length) {
-		return true;
-	}
-	// no meaningful filters were or going to be in use -> skip revalidation
-	if (
-		oldFilters &&
-		newFilters &&
-		oldFilters.length === 0 &&
-		newFilters.length === 0
-	) {
-		return false;
-	}
-	// all meaningful filters identical -> skip revalidation
-	if (
-		newFilters?.every((f1) =>
-			oldFilters?.some((f2) => {
-				if (f1.type !== f2.type) return false;
-
-				if (f1.type === "mode" && f2.type === "mode") {
-					return f1.mode === f2.mode;
-				}
-				if (f1.type === "date" && f2.type === "date") {
-					return f1.date === f2.date;
-				}
-				if (f1.type !== "ability" || f2.type !== "ability") return false;
-
-				return (
-					f1.ability === f2.ability &&
-					f1.comparison === f2.comparison &&
-					f1.value === f2.value
-				);
-			}),
-		)
-	) {
-		return false;
-	}
-
-	return args.defaultShouldRevalidate;
-};
+function filterKey(filter: ParsedFilter): string {
+	if (filter.type === "mode") return `mode:${filter.mode}`;
+	if (filter.type === "date") return `date:${filter.date}`;
+	return `ability:${filter.ability}:${filter.comparison}:${filter.value}`;
+}
 
 export const meta: MetaFunction<typeof loader> = (args) => {
 	if (!args.data) return [];
@@ -160,8 +162,6 @@ export const handle: SendouRouteHandle = {
 };
 
 export function BuildCards({ data }: { data: SerializeFrom<typeof loader> }) {
-	const user = useUser();
-
 	return (
 		<div className={styles.buildsContainer}>
 			{data.builds.map((build) => {
@@ -169,9 +169,12 @@ export function BuildCards({ data }: { data: SerializeFrom<typeof loader> }) {
 					<BuildCard
 						key={build.id}
 						build={build}
-						owner={build}
+						owner={
+							build.owner
+								? { ...build.owner, plusTier: build.plusTier }
+								: undefined
+						}
 						canEdit={false}
-						withAbilitySorting={!user?.preferences.disableBuildAbilitySorting}
 					/>
 				);
 			})}
@@ -182,22 +185,14 @@ export function BuildCards({ data }: { data: SerializeFrom<typeof loader> }) {
 export default function WeaponsBuildsPage() {
 	const data = useLoaderData<typeof loader>();
 	const { t } = useTranslation(["common", "builds"]);
-	const [, setSearchParams] = useSearchParams();
-	const [filters, setFilters] = React.useState<BuildFilter[]>(
-		data.filters ? data.filters.map((f) => ({ ...f, id: nanoid() })) : [],
-	);
+	const [searchParams, setSearchParams] = useSearchParams();
+	const filters = parseFiltersFromSearchParams(searchParams);
 
-	const filtersForSearchParams = (filters: BuildFilter[]) =>
-		JSON.stringify(
-			filters.map((f) => {
-				return R.omit(f, ["id"]);
-			}),
-		);
 	const syncSearchParams = (newFilters: BuildFilter[]) => {
 		setSearchParams(
-			filtersForSearchParams.length > 0
+			newFilters.length > 0
 				? {
-						[FILTER_SEARCH_PARAM_KEY]: filtersForSearchParams(newFilters),
+						[FILTER_SEARCH_PARAM_KEY]: JSON.stringify(newFilters),
 					}
 				: {},
 		);
@@ -207,7 +202,6 @@ export default function WeaponsBuildsPage() {
 		const newFilter: BuildFilter =
 			type === "ability"
 				? {
-						id: nanoid(),
 						type: "ability",
 						ability: "ISM",
 						comparison: "AT_LEAST",
@@ -215,43 +209,32 @@ export default function WeaponsBuildsPage() {
 					}
 				: type === "date"
 					? {
-							id: nanoid(),
 							type: "date",
-							date: PATCHES[0].date,
+							date: RECENT_PATCHES[0].date,
 						}
 					: {
-							id: nanoid(),
 							type: "mode",
 							mode: "SZ",
 						};
 
-		const newFilters = [...filters, newFilter];
-		setFilters(newFilters);
-
-		// no need to sync new ability filter as this doesn't have effect till they make other choices
-		if (type !== "ability") {
-			syncSearchParams(newFilters);
-		}
+		syncSearchParams([...filters, newFilter]);
 	};
 
 	const handleFilterChange = (i: number, newFilter: Partial<BuildFilter>) => {
-		const newFilters = structuredClone(filters);
-
-		newFilters[i] = {
-			...(filters[i] as AbilityBuildFilter),
-			...(newFilter as AbilityBuildFilter),
-		};
-
-		setFilters(newFilters);
+		const newFilters = filters.map((f, index) =>
+			index === i
+				? ({
+						...(f as AbilityBuildFilter),
+						...(newFilter as AbilityBuildFilter),
+					} as BuildFilter)
+				: f,
+		);
 
 		syncSearchParams(newFilters);
 	};
 
 	const handleFilterDelete = (i: number) => {
-		const newFilters = filters.filter((_, index) => index !== i);
-		setFilters(newFilters);
-
-		syncSearchParams(newFilters);
+		syncSearchParams(filters.filter((_, index) => index !== i));
 	};
 
 	const loadMoreLink = () => {
@@ -260,7 +243,7 @@ export default function WeaponsBuildsPage() {
 		params.set("limit", String(data.limit + BUILDS_PAGE_BATCH_SIZE));
 
 		if (filters.length > 0) {
-			params.set(FILTER_SEARCH_PARAM_KEY, filtersForSearchParams(filters));
+			params.set(FILTER_SEARCH_PARAM_KEY, JSON.stringify(filters));
 		}
 
 		return `?${params.toString()}`;
@@ -280,7 +263,7 @@ export default function WeaponsBuildsPage() {
 						<SendouButton
 							variant="outlined"
 							size="small"
-							icon={<FilterIcon />}
+							icon={<Funnel />}
 							isDisabled={filters.length >= MAX_BUILD_FILTERS}
 							data-testid="add-filter-button"
 						>
@@ -289,7 +272,7 @@ export default function WeaponsBuildsPage() {
 					}
 				>
 					<SendouMenuItem
-						icon={<BeakerFilledIcon />}
+						icon={<FlaskConical />}
 						isDisabled={filters.length >= MAX_BUILD_FILTERS}
 						onAction={() => handleFilterAdd("ability")}
 						data-testid="menu-item-ability"
@@ -304,7 +287,7 @@ export default function WeaponsBuildsPage() {
 						{t("builds:filters.type.mode")}
 					</SendouMenuItem>
 					<SendouMenuItem
-						icon={<CalendarIcon />}
+						icon={<Calendar />}
 						isDisabled={filters.some((filter) => filter.type === "date")}
 						onAction={() => handleFilterAdd("date")}
 						data-testid="menu-item-date"
@@ -316,7 +299,7 @@ export default function WeaponsBuildsPage() {
 					<LinkButton
 						to={weaponBuildStatsPage(data.slug)}
 						variant="outlined"
-						icon={<ChartBarIcon />}
+						icon={<ChartColumnBig />}
 						size="small"
 					>
 						{t("builds:linkButton.abilityStats")}
@@ -324,7 +307,7 @@ export default function WeaponsBuildsPage() {
 					<LinkButton
 						to={weaponBuildPopularPage(data.slug)}
 						variant="outlined"
-						icon={<FireIcon />}
+						icon={<Flame />}
 						size="small"
 					>
 						{t("builds:linkButton.popularBuilds")}
@@ -335,7 +318,7 @@ export default function WeaponsBuildsPage() {
 				<div className="stack md">
 					{filters.map((filter, i) => (
 						<FilterSection
-							key={filter.id}
+							key={i}
 							number={i + 1}
 							filter={filter}
 							onChange={(newFilter) => handleFilterChange(i, newFilter)}
@@ -346,19 +329,16 @@ export default function WeaponsBuildsPage() {
 				</div>
 			) : null}
 			<BuildCards data={data} />
-			{data.limit < BUILDS_PAGE_MAX_BUILDS &&
-				// not considering edge case where there are amount of builds equal to current limit
-				// TODO: this could be fixed by taking example from the vods page
-				data.builds.length === data.limit && (
-					<LinkButton
-						className="m-0-auto"
-						size="small"
-						to={loadMoreLink()}
-						preventScrollReset
-					>
-						{t("common:actions.loadMore")}
-					</LinkButton>
-				)}
+			{data.limit < BUILDS_PAGE_MAX_BUILDS && data.hasMoreBuilds ? (
+				<LinkButton
+					className="m-0-auto"
+					size="small"
+					to={loadMoreLink()}
+					preventScrollReset
+				>
+					{t("common:actions.loadMore")}
+				</LinkButton>
+			) : null}
 		</Main>
 	);
 }

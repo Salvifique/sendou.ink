@@ -1,4 +1,4 @@
-import { type ActionFunction, redirect } from "@remix-run/node";
+import { type ActionFunction, redirect } from "react-router";
 import { requireUser } from "~/features/auth/core/user.server";
 import { errorToastIfFalsy, notFoundIfFalsy } from "~/utils/remix.server";
 import { teamPage } from "~/utils/urls";
@@ -7,8 +7,8 @@ import * as TeamRepository from "../TeamRepository.server";
 import { TEAM } from "../team-constants";
 import { teamParamsSchema } from "../team-schemas.server";
 
-export const action: ActionFunction = async ({ request, params }) => {
-	const user = await requireUser(request);
+export const action: ActionFunction = async ({ params, url }) => {
+	const user = requireUser();
 	const { customUrl } = teamParamsSchema.parse(params);
 
 	const team = notFoundIfFalsy(
@@ -17,7 +17,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 		}),
 	);
 
-	const inviteCode = new URL(request.url).searchParams.get("code") ?? "";
+	const inviteCode = url.searchParams.get("code") ?? "";
 	const realInviteCode = team.inviteCode!;
 
 	errorToastIfFalsy(
@@ -31,13 +31,12 @@ export const action: ActionFunction = async ({ request, params }) => {
 		"Invite code is invalid",
 	);
 
-	await TeamRepository.addNewTeamMember({
+	await TeamRepository.joinTeam({
 		maxTeamsAllowed:
 			user.patronTier && user.patronTier >= 2
 				? TEAM.MAX_TEAM_COUNT_PATRON
 				: TEAM.MAX_TEAM_COUNT_NON_PATRON,
 		teamId: team.id,
-		userId: user.id,
 	});
 
 	throw redirect(teamPage(team.customUrl));

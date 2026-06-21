@@ -1,5 +1,10 @@
-import type { Rating, Team } from "node_modules/openskill/dist/types";
-import { rate as openskillRate, ordinal, rating } from "openskill";
+import {
+	rate as openskillRate,
+	ordinal,
+	type Rating,
+	rating,
+	type Team,
+} from "openskill";
 import invariant from "~/utils/invariant";
 import type { TierName } from "./mmr-constants";
 import { TIERS } from "./mmr-constants";
@@ -8,10 +13,6 @@ const TAU = 0.3;
 
 export function ordinalToSp(ordinal: number) {
 	return toTwoDecimals(ordinal * 15 + 1000);
-}
-
-export function spToOrdinal(sp: number) {
-	return (sp - 1000) / 15;
 }
 
 export function ordinalToRoundedSp(ordinal: number) {
@@ -25,7 +26,7 @@ function toTwoDecimals(value: number) {
 export function rate(teams: Team[], secondaryTeams?: [[Rating], [Rating]]) {
 	if (secondaryTeams) return rateConservative(teams, secondaryTeams);
 
-	return openskillRate(teams, { tau: TAU, preventSigmaIncrease: true });
+	return openskillRate(teams, { tau: TAU, limitSigma: true });
 }
 
 // when ranking teams we rate the team against the actual team rating that it played against
@@ -41,7 +42,7 @@ function rateConservative(
 		teams,
 		{
 			tau: TAU,
-			preventSigmaIncrease: true,
+			limitSigma: true,
 		},
 	);
 
@@ -49,7 +50,7 @@ function rateConservative(
 		[secondaryTeams[0], teams[1]],
 		{
 			tau: TAU,
-			preventSigmaIncrease: true,
+			limitSigma: true,
 		},
 	);
 
@@ -57,7 +58,7 @@ function rateConservative(
 		[teams[0], secondaryTeams[1]],
 		{
 			tau: TAU,
-			preventSigmaIncrease: true,
+			limitSigma: true,
 		},
 	);
 

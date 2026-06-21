@@ -1,65 +1,80 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
+import { getUser } from "~/features/auth/core/user.server";
 import { i18next } from "~/modules/i18n/i18next.server";
-import { weaponIdIsNotAlt } from "~/modules/in-game-lists/weapon-ids";
-import { logger } from "~/utils/logger";
+import { weaponIdToType } from "~/modules/in-game-lists/weapon-ids";
 import { weaponNameSlugToId } from "~/utils/unslugify.server";
 import { mySlugify } from "~/utils/urls";
+import * as BuildRepository from "../BuildRepository.server";
 import {
-	BUILDS_PAGE_BATCH_SIZE,
 	BUILDS_PAGE_MAX_BUILDS,
 	FILTER_SEARCH_PARAM_KEY,
 } from "../builds-constants";
-import { buildFiltersSearchParams } from "../builds-schemas.server";
-import { cachedBuildsByWeaponId } from "../core/cached-builds.server";
+import {
+	buildFiltersSearchParams,
+	buildsLimitSearchParam,
+} from "../builds-schemas";
 import { filterBuilds } from "../core/filter.server";
 
-export const loader = async ({ request, params }: LoaderFunctionArgs) => {
+export const loader = async ({ request, params, url }: LoaderFunctionArgs) => {
+	const user = getUser();
 	const t = await i18next.getFixedT(request, ["weapons", "common"], {
 		lng: "en",
 	});
 	const weaponId = weaponNameSlugToId(params.slug);
 
-	if (typeof weaponId !== "number" || !weaponIdIsNotAlt(weaponId)) {
+	if (typeof weaponId !== "number" || weaponIdToType(weaponId) === "ALT_SKIN") {
 		throw new Response(null, { status: 404 });
 	}
 
-	const url = new URL(request.url);
-	const limit = Math.min(
-		Number(url.searchParams.get("limit") ?? BUILDS_PAGE_BATCH_SIZE),
-		BUILDS_PAGE_MAX_BUILDS,
-	);
+	const limit = buildsLimitSearchParam.parse(url.searchParams.get("limit"));
 
 	const weaponName = t(`weapons:MAIN_${weaponId}`);
 
 	const slug = mySlugify(t(`weapons:MAIN_${weaponId}`, { lng: "en" }));
 
-	const cachedBuilds = cachedBuildsByWeaponId(weaponId);
+	const filters = resolveFilters(url.searchParams.get(FILTER_SEARCH_PARAM_KEY));
 
-	const rawFilters = url.searchParams.get(FILTER_SEARCH_PARAM_KEY);
-	const filters = buildFiltersSearchParams.safeParse(rawFilters ?? "[]");
+	const builds = await BuildRepository.allByWeaponId(weaponId, {
+		limit: filters ? BUILDS_PAGE_MAX_BUILDS : limit + 1,
+		sortAbilities: !user?.preferences?.disableBuildAbilitySorting,
+	});
 
-	if (!filters.success) {
-		logger.error(
-			"Invalid filters",
-			JSON.stringify(filters.error.issues, null, 2),
-		);
+	const filteredBuilds = filters
+		? filterBuilds({
+				builds,
+				filters,
+				count: limit + 1,
+			})
+		: builds;
+
+	let hasMoreBuilds = false;
+	if (filteredBuilds.length > limit) {
+		filteredBuilds.pop();
+
+		if (limit < BUILDS_PAGE_MAX_BUILDS) {
+			hasMoreBuilds = true;
+		}
 	}
-
-	const filteredBuilds =
-		filters.success && filters.data && filters.data.length > 0
-			? filterBuilds({
-					builds: cachedBuilds,
-					filters: filters.data,
-					count: limit,
-				})
-			: cachedBuilds.slice(0, limit);
 
 	return {
 		weaponId,
 		weaponName,
 		builds: filteredBuilds,
 		limit,
+		hasMoreBuilds,
 		slug,
-		filters: filters.success ? filters.data : [],
+		filters: filters ?? [],
 	};
 };
+
+function resolveFilters(rawFilters: string | null) {
+	if (!rawFilters) return null;
+
+	const filters = buildFiltersSearchParams.safeParse(rawFilters);
+	const hasActiveFilters =
+		filters.success && filters.data && filters.data.length > 0;
+
+	if (!hasActiveFilters) return null;
+
+	return filters.data;
+}

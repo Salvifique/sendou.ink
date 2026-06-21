@@ -10,9 +10,8 @@ Another key objective is to bridge the gap between casual and competitive player
 <details>
 <summary>Screenshots</summary>
 
-<img src="screenshot-1.png">
-<img src="screenshot-2.png">
-<img src="screenshot-3.png">
+<img src="desktop-bracket.png">
+<img src="mobile-analyzer.png">
 
 </details>
 
@@ -58,6 +57,7 @@ Another key objective is to bridge the gap between casual and competitive player
 
 - [Git](https://git-scm.com/)
 - [Node.js v22](https://nodejs.org/en)
+- [pnpm](https://pnpm.io/installation)
 
 Optionally [nvm](https://github.com/nvm-sh/nvm) can be convenient for managing multiple Node.js installs
 
@@ -68,6 +68,7 @@ First verify you have Node.js and git installed:
 ```bash
 node --version
 git --version
+pnpm --version
 ```
 
 You should see something like:
@@ -75,6 +76,7 @@ You should see something like:
 ```
 v22.13.0
 git version 2.39.5 (Apple Git-154)
+10.33.0
 ```
 (if not then go back to "Prerequisites" and install what is missing)
 
@@ -83,13 +85,31 @@ Then there is a sequence of commands you need to run:
 ```bash
 git clone https://github.com/sendou-ink/sendou.ink.git # Clones repository
 cd sendou.ink # Change to the project's folder
-npm install # Install dependencies
-npm run dev # Setup the development environment and run the project
+pnpm install # Install dependencies
+pnpm dev # Setup the development environment and run the project
 ```
 
 You should then be able to access the application by visiting http://localhost:5173
 
 Use the admin panel at http://localhost:5173/admin to log in (impersonate) as the admin user "Sendou" or as a regular user "N-ZAP" as well as re-seed the database if needed.
+
+#### Environment variables
+
+You don't need a `.env` file to get started. Default values for every environment variable are defined in [`app/config.ts`](./app/config.ts) (client `VITE_*` variables) and [`app/config.server.ts`](./app/config.server.ts) (server variables), and the development defaults are enough to run the app.
+
+To override any of them, create a `.env` file in the project root — see [`.env.example`](./.env.example) for the available variables. Some features (Discord login, image upload, chat) need real values or local services to actually work; without them the app still runs with those features disabled.
+
+In production these variables are read from the host environment, and the ones marked as required will fail fast at startup with a clear error if they are missing.
+
+#### Docker
+
+Optionally, if you want to develop image upload, real-time features or chat, you can use Docker to spin up the Skalop service and Minio for image hosting. You will need [Docker](https://www.docker.com/) up and running and then run the following command:
+
+```
+docker compose up -d
+```
+
+Minio admin UI to manage uploaded photos should be up and running at http://localhost:9001
 
 ## Contributing
 

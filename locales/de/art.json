@@ -9,8 +9,9 @@
 	"filteringByTag": "",
 	"commissionsOpen": "",
 	"commissionsClosed": "",
-	"openCommissionsOnly": "",
 	"gainPerms": "",
+	"tabs.recentlyUploaded": "",
+	"tabs.showcase": "",
 	"forms.caveats": "",
 	"forms.description.title": "",
 	"forms.linkedUsers.title": "",
@@ -27,5 +28,6 @@
 	"forms.tags.placeholder": "",
 	"forms.tags.maxReached": "",
 	"delete.title": "",
-	"unlink.title": ""
+	"unlink.title": "",
+	"noArtForTag": ""
 }

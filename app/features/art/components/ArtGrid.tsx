@@ -1,40 +1,36 @@
-import { Link } from "@remix-run/react";
 import clsx from "clsx";
+import { SquarePen, Trash, Unlink, X } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { Avatar } from "~/components/Avatar";
 import { LinkButton, SendouButton } from "~/components/elements/Button";
 import { SendouDialog } from "~/components/elements/Dialog";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
-import { CrossIcon } from "~/components/icons/Cross";
-import { EditIcon } from "~/components/icons/Edit";
-import { TrashIcon } from "~/components/icons/Trash";
-import { UnlinkIcon } from "~/components/icons/Unlink";
 import { Pagination } from "~/components/Pagination";
-import { useIsMounted } from "~/hooks/useIsMounted";
+import { useDateTimeFormat } from "~/hooks/intl/useDateTimeFormat";
+import { useFormatDistanceToNow } from "~/hooks/intl/useFormatDistanceToNow";
+import { useHydrated } from "~/hooks/useHydrated";
 import { usePagination } from "~/hooks/usePagination";
 import { useSearchParamState } from "~/hooks/useSearchParamState";
 import { databaseTimestampToDate } from "~/utils/dates";
-import {
-	artPage,
-	conditionalUserSubmittedImage,
-	newArtPage,
-	userArtPage,
-	userPage,
-} from "~/utils/urls";
+import { artPage, newArtPage, userArtPage, userPage } from "~/utils/urls";
 import { ResponsiveMasonry } from "../../../modules/responsive-masonry/components/ResponsiveMasonry";
 import { ART_PER_PAGE } from "../art-constants";
 import type { ListedArt } from "../art-types";
 import { previewUrl } from "../art-utils";
+import styles from "./ArtGrid.module.css";
 
 export function ArtGrid({
 	arts,
 	enablePreview = false,
 	canEdit = false,
+	showUploadDate = false,
 }: {
 	arts: ListedArt[];
 	enablePreview?: boolean;
 	canEdit?: boolean;
+	showUploadDate?: boolean;
 }) {
 	const {
 		itemsToDisplay,
@@ -54,9 +50,9 @@ export function ArtGrid({
 		revive: (value) =>
 			itemsToDisplay.find((art) => art.id === Number(value))?.id,
 	});
-	const isMounted = useIsMounted();
+	const isHydrated = useHydrated();
 
-	if (!isMounted) return null;
+	if (!isHydrated) return null;
 
 	const bigArt = itemsToDisplay.find((art) => art.id === bigArtId);
 
@@ -72,70 +68,74 @@ export function ArtGrid({
 						art={art}
 						canEdit={canEdit}
 						enablePreview={enablePreview}
+						showUploadDate={showUploadDate}
 						onClick={enablePreview ? () => setBigArtId(art.id) : undefined}
 					/>
 				))}
 			</ResponsiveMasonry>
 			{!everythingVisible ? (
-				<Pagination
-					currentPage={currentPage}
-					pagesCount={pagesCount}
-					nextPage={nextPage}
-					previousPage={previousPage}
-					setPage={setPage}
-				/>
+				<div className="mt-6">
+					<Pagination
+						currentPage={currentPage}
+						pagesCount={pagesCount}
+						nextPage={nextPage}
+						previousPage={previousPage}
+						setPage={setPage}
+					/>
+				</div>
 			) : null}
 		</>
 	);
 }
 
 function BigImageDialog({ close, art }: { close: () => void; art: ListedArt }) {
-	const { i18n } = useTranslation();
 	const [imageLoaded, setImageLoaded] = React.useState(false);
+	const { formatter } = useDateTimeFormat({
+		year: "numeric",
+		month: "numeric",
+		day: "numeric",
+	});
 
 	return (
 		<SendouDialog
-			heading={databaseTimestampToDate(art.createdAt).toLocaleDateString(
-				i18n.language,
-				{
-					year: "numeric",
-					month: "long",
-					day: "numeric",
-				},
-			)}
+			heading={formatter.format(databaseTimestampToDate(art.createdAt)) ?? ""}
 			onClose={close}
 			isFullScreen
 		>
 			<img
 				alt=""
-				src={conditionalUserSubmittedImage(art.url)}
+				src={art.url}
 				loading="lazy"
-				className="art__dialog__img"
+				className={styles.dialogImg}
 				onLoad={() => setImageLoaded(true)}
 			/>
 			{art.tags || art.linkedUsers ? (
 				<div
-					className={clsx("art__tags-container", { invisible: !imageLoaded })}
+					className={clsx(styles.tagsContainer, { invisible: !imageLoaded })}
 				>
 					{art.linkedUsers?.map((user) => (
 						<Link
 							to={userPage(user)}
 							key={user.discordId}
-							className="art__dialog__tag art__dialog__tag__user"
+							className={clsx(styles.dialogTag, styles.dialogTagUser)}
 						>
 							{user.username}
 						</Link>
 					))}
 					{art.tags?.map((tag) => (
-						<Link to={artPage(tag)} key={tag} className="art__dialog__tag">
-							#{tag}
+						<Link
+							to={artPage(tag.name)}
+							key={tag.id}
+							className={styles.dialogTag}
+						>
+							#{tag.name}
 						</Link>
 					))}
 				</div>
 			) : null}
 			{art.description ? (
 				<div
-					className={clsx("art__dialog__description", {
+					className={clsx(styles.dialogDescription, {
 						invisible: !imageLoaded,
 					})}
 				>
@@ -146,7 +146,7 @@ function BigImageDialog({ close, art }: { close: () => void; art: ListedArt }) {
 				variant="destructive"
 				className="mx-auto mt-6"
 				onPress={close}
-				icon={<CrossIcon />}
+				icon={<X />}
 			>
 				Close
 			</SendouButton>
@@ -159,24 +159,27 @@ function ImagePreview({
 	onClick,
 	enablePreview = false,
 	canEdit = false,
+	showUploadDate = false,
 }: {
 	art: ListedArt;
 	onClick?: () => void;
 	enablePreview?: boolean;
 	canEdit?: boolean;
+	showUploadDate?: boolean;
 }) {
 	const [imageLoaded, setImageLoaded] = React.useState(false);
 	const { t } = useTranslation(["common", "art"]);
+	const formatDistanceToNow = useFormatDistanceToNow();
 
 	const img = (
 		// biome-ignore lint/a11y/noStaticElementInteractions: Biome v2 migration
 		<img
 			alt=""
-			src={conditionalUserSubmittedImage(previewUrl(art.url))}
+			src={previewUrl(art.url)}
 			loading="lazy"
 			onClick={onClick}
 			onLoad={() => setImageLoaded(true)}
-			className={enablePreview ? "art__thumbnail" : undefined}
+			className={enablePreview ? styles.thumbnail : undefined}
 		/>
 	);
 
@@ -193,7 +196,7 @@ function ImagePreview({
 						to={newArtPage(art.id)}
 						size="small"
 						variant="outlined"
-						icon={<EditIcon />}
+						icon={<SquarePen />}
 					>
 						{t("common:actions.edit")}
 					</LinkButton>
@@ -204,17 +207,19 @@ function ImagePreview({
 							["_action", "DELETE_ART"],
 						]}
 					>
-						<SendouButton
-							icon={<TrashIcon />}
-							variant="destructive"
-							size="small"
-						/>
+						<SendouButton icon={<Trash />} variant="destructive" size="small" />
 					</FormWithConfirm>
 				</div>
 			</div>
 		);
 	}
 	if (!art.author) return img;
+
+	const uploadDateText = showUploadDate
+		? formatDistanceToNow(databaseTimestampToDate(art.createdAt), {
+				addSuffix: true,
+			})
+		: null;
 
 	// whole thing is not a link so we can preview the image
 	if (enablePreview) {
@@ -235,6 +240,15 @@ function ImagePreview({
 						<Avatar user={art.author} size="xxs" />
 						{t("art:madeBy")} {art.author.username}
 					</Link>
+					{uploadDateText ? (
+						<div
+							className={clsx("text-xs text-lighter", {
+								invisible: !imageLoaded,
+							})}
+						>
+							{uploadDateText}
+						</div>
+					) : null}
 					{canEdit ? (
 						<FormWithConfirm
 							dialogHeading={t("art:unlink.title", {
@@ -247,7 +261,7 @@ function ImagePreview({
 							submitButtonText={t("common:actions.remove")}
 						>
 							<SendouButton
-								icon={<UnlinkIcon />}
+								icon={<Unlink />}
 								variant="destructive"
 								size="small"
 							/>
@@ -261,13 +275,24 @@ function ImagePreview({
 	return (
 		<Link to={userArtPage(art.author, "MADE-BY")}>
 			{img}
-			<div
-				className={clsx("stack sm horizontal text-xs items-center mt-1", {
-					invisible: !imageLoaded,
-				})}
-			>
-				<Avatar user={art.author} size="xxs" />
-				{art.author.username}
+			<div className="stack horizontal justify-between">
+				<div
+					className={clsx("stack sm horizontal text-xs items-center mt-1", {
+						invisible: !imageLoaded,
+					})}
+				>
+					<Avatar user={art.author} size="xxs" />
+					{art.author.username}
+				</div>
+				{uploadDateText ? (
+					<div
+						className={clsx("text-xxs mt-1 text-lighter", {
+							invisible: !imageLoaded,
+						})}
+					>
+						{uploadDateText}
+					</div>
+				) : null}
 			</div>
 		</Link>
 	);

@@ -1,24 +1,28 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { z } from "zod/v4";
-import { requireUserId } from "~/features/auth/core/user.server";
+import type { LoaderFunctionArgs } from "react-router";
+import { z } from "zod";
+import { requireUser } from "~/features/auth/core/user.server";
+import {
+	validatedBuildFromSearchParams,
+	validatedWeaponIdFromSearchParams,
+} from "~/features/build-analyzer/core/utils";
 import * as BuildRepository from "~/features/builds/BuildRepository.server";
+import type { WeaponPoolItem } from "~/form/fields/WeaponPoolFormField";
 import type { Ability } from "~/modules/in-game-lists/types";
 import { actualNumber, id } from "~/utils/zod";
+import type { newBuildBaseSchema } from "../user-page-schemas";
 
 const newBuildLoaderParamsSchema = z.object({
 	buildId: z.preprocess(actualNumber, id),
 });
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-	const user = await requireUserId(request);
-	const url = new URL(request.url);
+export const loader = async ({ url }: LoaderFunctionArgs) => {
+	const user = requireUser();
 
 	const params = newBuildLoaderParamsSchema.safeParse(
 		Object.fromEntries(url.searchParams),
 	);
 
-	const usersBuilds = await BuildRepository.allByUserId({
-		userId: user.id,
+	const usersBuilds = await BuildRepository.allByUserId(user.id, {
 		showPrivate: true,
 	});
 	const buildToEdit = usersBuilds.find(
@@ -26,7 +30,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 	);
 
 	return {
-		buildToEdit,
+		defaultValues: resolveDefaultValues(url.searchParams, buildToEdit),
 		gearIdToAbilities: resolveGearIdToAbilities(),
 	};
 
@@ -43,3 +47,49 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		);
 	}
 };
+
+type NewBuildDefaultValues = Partial<z.infer<typeof newBuildBaseSchema>>;
+
+function resolveDefaultValues(
+	searchParams: URLSearchParams,
+	buildToEdit:
+		| Awaited<ReturnType<typeof BuildRepository.allByUserId>>[number]
+		| undefined,
+): NewBuildDefaultValues | null {
+	const weapons = resolveDefaultWeapons();
+	const abilities =
+		buildToEdit?.abilities ?? validatedBuildFromSearchParams(searchParams);
+
+	if (!buildToEdit && weapons.length === 0 && !abilities) {
+		return null;
+	}
+
+	return {
+		buildToEditId: buildToEdit?.id,
+		weapons,
+		head: buildToEdit?.headGearSplId,
+		clothes: buildToEdit?.clothesGearSplId,
+		shoes: buildToEdit?.shoesGearSplId,
+		abilities,
+		title: buildToEdit?.title,
+		description: buildToEdit?.description ?? null,
+		modes: buildToEdit?.modes ?? [],
+		private: Boolean(buildToEdit?.private),
+	};
+
+	function resolveDefaultWeapons(): WeaponPoolItem[] {
+		if (buildToEdit) {
+			return buildToEdit.weapons.map((wpn) => ({
+				id: wpn.weaponSplId,
+				isFavorite: false,
+			}));
+		}
+
+		const weaponIdFromParams = validatedWeaponIdFromSearchParams(searchParams);
+		if (weaponIdFromParams) {
+			return [{ id: weaponIdFromParams, isFavorite: false }];
+		}
+
+		return [];
+	}
+}

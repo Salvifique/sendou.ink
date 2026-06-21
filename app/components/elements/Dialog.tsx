@@ -1,5 +1,5 @@
-import { useNavigate } from "@remix-run/react";
 import clsx from "clsx";
+import { X } from "lucide-react";
 import type { ModalOverlayProps } from "react-aria-components";
 import {
 	Dialog,
@@ -8,8 +8,9 @@ import {
 	Modal,
 	ModalOverlay,
 } from "react-aria-components";
+import { useNavigate } from "react-router";
+import * as R from "remeda";
 import { SendouButton } from "~/components/elements/Button";
-import { CrossIcon } from "~/components/icons/Cross";
 import styles from "./Dialog.module.css";
 
 interface SendouDialogProps extends ModalOverlayProps {
@@ -68,7 +69,9 @@ export function SendouDialog({
 	return (
 		<DialogTrigger>
 			{trigger}
-			<DialogModal {...rest}>{children}</DialogModal>
+			<DialogModal {...rest} isControlledByTrigger>
+				{children}
+			</DialogModal>
 		</DialogTrigger>
 	);
 }
@@ -79,8 +82,9 @@ function DialogModal({
 	showHeading = true,
 	className,
 	showCloseButton: showCloseButtonProp,
+	isControlledByTrigger,
 	...rest
-}: Omit<SendouDialogProps, "trigger">) {
+}: Omit<SendouDialogProps, "trigger"> & { isControlledByTrigger?: boolean }) {
 	const navigate = useNavigate();
 
 	const showCloseButton = showCloseButtonProp || rest.onClose || rest.onCloseTo;
@@ -92,7 +96,7 @@ function DialogModal({
 		}
 	};
 
-	const onOpenChange = (isOpen: boolean) => {
+	const defaultOnOpenChange = (isOpen: boolean) => {
 		if (!isOpen) {
 			if (rest.onCloseTo) {
 				navigate(rest.onCloseTo);
@@ -102,16 +106,19 @@ function DialogModal({
 		}
 	};
 
+	const overlayProps = isControlledByTrigger
+		? R.omit(rest, ["onOpenChange"])
+		: { ...rest, onOpenChange: rest.onOpenChange ?? defaultOnOpenChange };
+
 	return (
 		<ModalOverlay
 			className={clsx(rest.overlayClassName, styles.overlay, {
 				[styles.fullScreenOverlay]: rest.isFullScreen,
 			})}
-			onOpenChange={rest.onOpenChange ?? onOpenChange}
-			{...rest}
+			{...overlayProps}
 		>
 			<Modal
-				className={clsx(className, styles.modal, {
+				className={clsx(className, styles.modal, "scrollbar", {
 					[styles.fullScreenModal]: rest.isFullScreen,
 				})}
 			>
@@ -129,7 +136,8 @@ function DialogModal({
 							) : null}
 							{showCloseButton ? (
 								<SendouButton
-									icon={<CrossIcon />}
+									icon={<X />}
+									shape="circle"
 									variant="minimal-destructive"
 									className="ml-auto"
 									slot="close"

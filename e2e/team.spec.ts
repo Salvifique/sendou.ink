@@ -1,52 +1,37 @@
-import { expect, test } from "@playwright/test";
 import { NZAP_TEST_ID } from "~/db/seed/constants";
 import { ADMIN_DISCORD_ID, ADMIN_ID } from "~/features/admin/admin-constants";
 import {
+	createTeamSchema,
+	editTeamFormSchema,
+} from "~/features/team/team-schemas";
+import { editTeamPage, teamPage, userPage } from "~/utils/urls";
+import {
+	expect,
 	impersonate,
 	isNotVisible,
 	modalClickConfirmButton,
 	navigate,
 	seed,
 	submit,
-} from "~/utils/playwright";
-import {
-	editTeamPage,
-	TEAM_SEARCH_PAGE,
-	teamPage,
-	userPage,
-} from "~/utils/urls";
+	test,
+	waitForPOSTResponse,
+} from "./helpers/playwright";
+import { createFormHelpers } from "./helpers/playwright-form";
 
-test.describe("Team search page", () => {
-	test("filters teams", async ({ page }) => {
-		await seed(page);
-		await impersonate(page);
-		await navigate({ page, url: TEAM_SEARCH_PAGE });
-
-		const searchInput = page.getByTestId("team-search-input");
-		const firstTeamName = page.getByTestId("team-0");
-		const secondTeamName = page.getByTestId("team-1");
-
-		await expect(firstTeamName).toHaveText("Alliance Rogue");
-		await expect(secondTeamName).toBeVisible();
-
-		await searchInput.fill("Alliance Rogue");
-		await expect(secondTeamName).not.toBeVisible();
-
-		await firstTeamName.click();
-		await expect(page).toHaveURL(/alliance-rogue/);
-	});
-
+test.describe("New team creation", () => {
 	test("creates new team", async ({ page }) => {
 		await seed(page);
 		await impersonate(page, NZAP_TEST_ID);
 		await navigate({ page, url: "/" });
 
-		await page.getByTestId("anything-adder-menu-button").click();
+		await page.getByTestId("anything-adder-menu-button").first().click();
 		await page.getByTestId("menu-item-team").click();
 
-		await expect(page).toHaveURL(/new=true/);
-		await page.getByTestId("new-team-name-input").fill("Chimera");
-		await submit(page);
+		await expect(page).toHaveURL(/t\/new/);
+
+		const form = createFormHelpers(page, createTeamSchema);
+		await form.fill("name", "Chimera");
+		await form.submit();
 
 		await expect(page).toHaveURL(/chimera/);
 	});
@@ -60,16 +45,15 @@ test.describe("Team page", () => {
 
 		await page.getByTestId("edit-team-button").click();
 
-		await page.getByTestId("name-input").clear();
-		await page.getByTestId("name-input").fill("Better Alliance Rogue");
+		const form = createFormHelpers(page, editTeamFormSchema, {
+			submitTestId: "edit-team-submit-button",
+		});
 
-		await page.getByLabel("Team Bluesky").clear();
-		await page.getByLabel("Team Bluesky").fill("BetterAllianceRogue");
+		await form.fill("name", "Better Alliance Rogue");
+		await form.fill("bsky", "BetterAllianceRogue");
+		await form.fill("bio", "shorter bio");
 
-		await page.getByTestId("bio-textarea").clear();
-		await page.getByTestId("bio-textarea").fill("shorter bio");
-
-		await page.getByTestId("edit-team-submit-button").click();
+		await form.submit();
 
 		await expect(page).toHaveURL(/better-alliance-rogue/);
 		await page.getByText("shorter bio").isVisible();
@@ -89,32 +73,103 @@ test.describe("Team page", () => {
 
 		await page.getByTestId("manage-roster-button").click();
 
-		await page.getByTestId("role-select-0").selectOption("SUPPORT");
+		await page
+			.getByTestId("member-row-0")
+			.locator("select")
+			.selectOption("SUPPORT");
 
-		await page.getByTestId("member-row-3").isVisible();
-		await page.getByTestId("kick-button").last().click();
-		await modalClickConfirmButton(page);
+		await expect(page.getByTestId("member-row-3")).toBeVisible();
+		await page
+			.locator("fieldset:has([data-testid='member-row-3'])")
+			.getByRole("button", { name: "Remove item" })
+			.click();
 		await isNotVisible(page.getByTestId("member-row-3"));
+
+		await submit(page);
 
 		await navigate({ page, url: teamPage("alliance-rogue") });
 
 		await expect(page.getByTestId("member-row-role-0")).toHaveText("Support");
 	});
 
+	test("sets a custom role for a member", async ({ page }) => {
+		await seed(page);
+		await impersonate(page, ADMIN_ID);
+		await navigate({ page, url: teamPage("alliance-rogue") });
+
+		await page.getByTestId("manage-roster-button").click();
+
+		const memberRow = page.getByTestId("member-row-1");
+		await memberRow.locator("select").first().selectOption("CUSTOM");
+		await memberRow.getByRole("textbox").fill("Strategist");
+		await memberRow.locator("select").nth(1).selectOption("OTHER");
+
+		await submit(page);
+
+		await navigate({ page, url: teamPage("alliance-rogue") });
+
+		// custom role is classified as "OTHER" so it lives under the "Other" tab
+		await page.getByRole("tab", { name: /Other/ }).click();
+		await expect(page.getByText("Strategist").first()).toBeVisible();
+	});
+
+	test("reorders members via move buttons", async ({ page }) => {
+		await seed(page);
+		await impersonate(page, ADMIN_ID);
+		await navigate({ page, url: teamPage("alliance-rogue") });
+
+		await page.getByTestId("manage-roster-button").click();
+
+		const firstName = await page
+			.getByTestId("member-row-username-0")
+			.innerText();
+		const secondName = await page
+			.getByTestId("member-row-username-1")
+			.innerText();
+		expect(firstName).not.toBe(secondName);
+
+		const firstRow = page.locator("fieldset:has([data-testid='member-row-0'])");
+		const lastRow = page.locator("fieldset:has([data-testid='member-row-3'])");
+
+		// the first member can't move up and the last can't move down
+		await expect(
+			firstRow.getByRole("button", { name: "Move up" }),
+		).toBeDisabled();
+		await expect(
+			lastRow.getByRole("button", { name: "Move down" }),
+		).toBeDisabled();
+
+		// move the first member down one slot
+		await firstRow.getByRole("button", { name: "Move down" }).click();
+
+		await expect(page.getByTestId("member-row-username-0")).toHaveText(
+			secondName,
+		);
+		await expect(page.getByTestId("member-row-username-1")).toHaveText(
+			firstName,
+		);
+
+		await submit(page);
+
+		await navigate({ page, url: teamPage("alliance-rogue") });
+		await page.getByTestId("manage-roster-button").click();
+
+		// the new order is persisted
+		await expect(page.getByTestId("member-row-username-0")).toHaveText(
+			secondName,
+		);
+	});
+
 	test("deletes team", async ({ page }) => {
 		await seed(page);
 		await impersonate(page, ADMIN_ID);
+		await navigate({ page, url: teamPage("alliance-rogue") });
 
-		await navigate({ page, url: TEAM_SEARCH_PAGE });
-		const firstTeamName = page.getByTestId("team-0");
-		await firstTeamName.click();
-
-		await page.getByTestId("edit-team-button").click();
+		await page.getByTestId("team-actions-menu-button").click();
 		await page.getByTestId("delete-team-button").click();
 		await modalClickConfirmButton(page);
 
-		await expect(page).toHaveURL(TEAM_SEARCH_PAGE);
-		await expect(page.getByTestId("team-0")).not.toHaveText("Alliance Rogue");
+		await expect(page).not.toHaveURL(/alliance-rogue/);
 	});
 
 	test("resets invite code, joins team, leaves, rejoins", async ({ page }) => {
@@ -126,7 +181,7 @@ test.describe("Team page", () => {
 
 		const oldInviteLink = await page.getByTestId("invite-link").innerText();
 
-		await page.getByTestId("reset-invite-link-button").click();
+		await submit(page, "reset-invite-link-button");
 
 		await expect(page.getByTestId("invite-link")).not.toHaveText(oldInviteLink);
 		const newInviteLink = await page.getByTestId("invite-link").innerText();
@@ -136,13 +191,15 @@ test.describe("Team page", () => {
 		await navigate({ page, url: newInviteLink });
 		await submit(page);
 
+		await page.getByTestId("team-actions-menu-button").click();
 		await page.getByTestId("leave-team-button").click();
 		await modalClickConfirmButton(page);
 
 		await navigate({ page, url: newInviteLink });
 		await submit(page);
 
-		await page.getByTestId("leave-team-button").isVisible();
+		await page.getByTestId("team-actions-menu-button").click();
+		await expect(page.getByTestId("leave-team-button")).toBeVisible();
 	});
 
 	test("joins a secondary team, makes main team & leaves making the seconary team the main one", async ({
@@ -158,7 +215,10 @@ test.describe("Team page", () => {
 		await navigate({ page, url: inviteLink });
 		await submit(page);
 
-		await submit(page, "make-main-team-button");
+		await page.getByTestId("team-actions-menu-button").click();
+		await waitForPOSTResponse(page, async () => {
+			await page.getByTestId("make-main-team-button").click();
+		});
 
 		await navigate({ page, url: userPage({ discordId: ADMIN_DISCORD_ID }) });
 
@@ -167,6 +227,8 @@ test.describe("Team page", () => {
 
 		await page.getByTestId("main-team-link").click();
 
+		await page.getByTestId("team-actions-menu-button").click();
+		await expect(page.getByTestId("main-team-indicator")).toBeVisible();
 		await page.getByTestId("leave-team-button").click();
 		await modalClickConfirmButton(page);
 
@@ -186,23 +248,28 @@ test.describe("Team page", () => {
 		await page.getByTestId("manage-roster-button").click();
 
 		await page.getByLabel("Editor").first().click({ force: true });
+		await submit(page);
 
 		await impersonate(page, NZAP_TEST_ID);
 		await navigate({ page, url: editTeamPage("alliance-rogue") });
 
-		await page.getByTestId("bio-textarea").clear();
-		await page.getByTestId("bio-textarea").fill("from editor");
-		await page.getByTestId("edit-team-submit-button").click();
+		const editorForm = createFormHelpers(page, editTeamFormSchema, {
+			submitTestId: "edit-team-submit-button",
+		});
+		await editorForm.fill("bio", "from editor");
+		await editorForm.submit();
 
 		await expect(page).toHaveURL(/alliance-rogue/);
 		await page.getByText("from editor").isVisible();
 
 		await impersonate(page, ADMIN_ID);
 		await navigate({ page, url: teamPage("alliance-rogue") });
+		await page.getByTestId("team-actions-menu-button").click();
 		await page.getByTestId("leave-team-button").click();
 		await page.getByText("New owner will be N-ZAP").isVisible();
 		await modalClickConfirmButton(page);
 
+		await page.getByTestId("team-actions-menu-button").click();
 		await isNotVisible(page.getByTestId("leave-team-button"));
 	});
 });

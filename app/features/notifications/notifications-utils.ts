@@ -1,6 +1,7 @@
 import { assertUnreachable } from "~/utils/types";
 import {
 	badgePage,
+	FRIENDS_PAGE,
 	PLUS_VOTING_PAGE,
 	plusSuggestionPage,
 	SENDOUQ_PAGE,
@@ -9,8 +10,10 @@ import {
 	sendouQMatchPage,
 	tournamentBracketsPage,
 	tournamentRegisterPage,
+	tournamentSubsPage,
 	tournamentTeamPage,
 	userArtPage,
+	userEditProfilePage,
 } from "~/utils/urls";
 import type { Notification } from "./notifications-types";
 
@@ -27,16 +30,23 @@ export const notificationNavIcon = (type: Notification["type"]) => {
 		case "SEASON_STARTED":
 			return "sendouq";
 		case "TAGGED_TO_ART":
+		case "COMMISSIONS_CLOSED":
 			return "art";
 		case "TO_ADDED_TO_TEAM":
 		case "TO_BRACKET_STARTED":
 		case "TO_CHECK_IN_OPENED":
 		case "TO_TEST_CREATED":
+		case "TO_LIKE_RECEIVED":
+		case "TO_LIKE_ACCEPTED":
 			return "medal";
 		case "SCRIM_NEW_REQUEST":
 		case "SCRIM_SCHEDULED":
 		case "SCRIM_CANCELED":
+		case "SCRIM_STARTING_SOON":
+		case "SCRIM_AUTO_DELETED":
 			return "scrims";
+		case "FRIEND_REQUEST_RECEIVED":
+			return "sendou_love";
 		default:
 			assertUnreachable(type);
 	}
@@ -76,39 +86,26 @@ export const notificationLink = (notification: Notification) => {
 		case "TO_TEST_CREATED":
 		case "TO_CHECK_IN_OPENED":
 			return tournamentRegisterPage(notification.meta.tournamentId);
-		case "SCRIM_NEW_REQUEST": {
+		case "SCRIM_NEW_REQUEST":
+		case "SCRIM_AUTO_DELETED": {
 			return scrimsPage();
 		}
 		case "SCRIM_CANCELED":
-		case "SCRIM_SCHEDULED": {
+		case "SCRIM_SCHEDULED":
+		case "SCRIM_STARTING_SOON": {
 			return scrimPage(notification.meta.id);
+		}
+		case "COMMISSIONS_CLOSED": {
+			return userEditProfilePage({ discordId: notification.meta.discordId });
+		}
+		case "FRIEND_REQUEST_RECEIVED": {
+			return FRIENDS_PAGE;
+		}
+		case "TO_LIKE_RECEIVED":
+		case "TO_LIKE_ACCEPTED": {
+			return tournamentSubsPage(notification.meta.tournamentId);
 		}
 		default:
 			assertUnreachable(notification);
 	}
-};
-
-/** Takes the `meta` object of a notification and transforms it (if needed) to show the translated string to user */
-export const mapMetaForTranslation = (
-	notification: Notification,
-	language: string,
-) => {
-	if (
-		notification.type === "SCRIM_SCHEDULED" ||
-		notification.type === "SCRIM_CANCELED"
-	) {
-		return {
-			...notification.meta,
-			timeString: notification.meta.at // TODO: after two weeks this check can be removed (all notifications will have `at`)
-				? new Date(notification.meta.at).toLocaleString(language, {
-						day: "numeric",
-						month: "numeric",
-						hour: "numeric",
-						minute: "numeric",
-					})
-				: undefined,
-		};
-	}
-
-	return notification.meta;
 };

@@ -1,49 +1,50 @@
-import type { ActionFunction } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
-import { requireUserId } from "~/features/auth/core/user.server";
+import type { ActionFunction } from "react-router";
+import { redirect } from "react-router";
+import { requireUser } from "~/features/auth/core/user.server";
 import * as ShowcaseTournaments from "~/features/front-page/core/ShowcaseTournaments.server";
+import * as TournamentTeamRepository from "~/features/tournament/TournamentTeamRepository.server";
 import {
 	clearTournamentDataCache,
 	tournamentFromDB,
 } from "~/features/tournament-bracket/core/Tournament.server";
+import * as TournamentLFGRepository from "~/features/tournament-lfg/TournamentLFGRepository.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
 import invariant from "~/utils/invariant";
 import {
 	errorToastIfFalsy,
 	notFoundIfFalsy,
 	parseParams,
-	parseRequestPayload,
 } from "~/utils/remix.server";
 import { tournamentPage } from "~/utils/urls";
 import { idObject } from "~/utils/zod";
-import { findByInviteCode } from "../queries/findTeamByInviteCode.server";
-import { giveTrust } from "../queries/giveTrust.server";
-import { joinTeam } from "../queries/joinLeaveTeam.server";
-import { joinSchema } from "../tournament-schemas.server";
 import { validateCanJoinTeam } from "../tournament-utils";
 import {
-	inGameNameIfNeeded,
 	requireNotBannedByOrganization,
+	requireSendouQParticipationIfNeeded,
 } from "../tournament-utils.server";
 
-export const action: ActionFunction = async ({ request, params }) => {
+export const action: ActionFunction = async ({ params, url }) => {
 	const { id: tournamentId } = parseParams({
 		params,
 		schema: idObject,
 	});
-	const user = await requireUserId(request);
-	const url = new URL(request.url);
+	const user = requireUser();
 	const inviteCode = url.searchParams.get("code");
-	const data = await parseRequestPayload({ request, schema: joinSchema });
 	invariant(inviteCode, "code is missing");
 
-	const leanTeam = notFoundIfFalsy(findByInviteCode(inviteCode));
+	const leanTeam = notFoundIfFalsy(
+		await TournamentTeamRepository.findByInviteCode(inviteCode),
+	);
 
 	const tournament = await tournamentFromDB({ tournamentId, user });
 
 	await requireNotBannedByOrganization({
 		tournament,
 		user,
+	});
+	await requireSendouQParticipationIfNeeded({
+		tournament,
+		userId: user.id,
 	});
 
 	const teamToJoin = tournament.ctx.teams.find(
@@ -68,7 +69,7 @@ export const action: ActionFunction = async ({ request, params }) => {
 			inviteCode,
 			teamToJoin,
 			userId: user.id,
-			maxTeamSize: tournament.maxTeamMemberCount,
+			maxTeamSize: tournament.maxMembersPerTeam,
 		}) === "VALID",
 		"Cannot join this team or invite code is invalid",
 	);
@@ -80,12 +81,13 @@ export const action: ActionFunction = async ({ request, params }) => {
 	const whatToDoWithPreviousTeam = !previousTeam
 		? undefined
 		: previousTeam.members.some(
-					(member) => member.userId === user.id && member.isOwner,
+					(member) => member.userId === user.id && member.role === "OWNER",
 				)
 			? "DELETE"
 			: "LEAVE";
 
-	joinTeam({
+	await TournamentLFGRepository.leaveLfg({ userId: user.id, tournamentId });
+	await TournamentTeamRepository.join({
 		userId: user.id,
 		newTeamId: teamToJoin.id,
 		previousTeamId: previousTeam?.id,
@@ -96,11 +98,6 @@ export const action: ActionFunction = async ({ request, params }) => {
 			previousTeam &&
 			previousTeam.members.length <= tournament.minMembersPerTeam,
 		whatToDoWithPreviousTeam,
-		tournamentId,
-		inGameName: await inGameNameIfNeeded({
-			tournament,
-			userId: user.id,
-		}),
 	});
 
 	ShowcaseTournaments.addToCached({
@@ -108,17 +105,6 @@ export const action: ActionFunction = async ({ request, params }) => {
 		type: "participant",
 		userId: user.id,
 	});
-
-	if (data.trust) {
-		const inviterUserId = teamToJoin.members.find(
-			(member) => member.isOwner,
-		)?.userId;
-		invariant(inviterUserId, "Inviter user could not be resolved");
-		giveTrust({
-			trustGiverUserId: user.id,
-			trustReceiverUserId: inviterUserId,
-		});
-	}
 
 	clearTournamentDataCache(tournamentId);
 

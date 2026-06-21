@@ -173,6 +173,340 @@ describe("validatedSources - PLACEMENTS_PARSE_ERROR", () => {
 
 		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
 	});
+
+	it("allows empty string placements for Swiss brackets with early advance", () => {
+		const result = Progression.validatedBrackets([
+			{
+				id: "1",
+				name: "Swiss Bracket",
+				type: "swiss",
+				settings: {
+					advanceThreshold: 3,
+				},
+				requiresCheckIn: false,
+			},
+			{
+				id: "2",
+				name: "Final Bracket",
+				type: "single_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketId: "1",
+						placements: "",
+					},
+				],
+			},
+		]) as Progression.ParsedBracket[];
+
+		expect(result[1].sources).toEqual([{ bracketIdx: 0, placements: [] }]);
+	});
+
+	it("parsing fails with empty string placements for non-Swiss brackets", () => {
+		const error = Progression.validatedBrackets([
+			{
+				id: "1",
+				name: "Round Robin Bracket",
+				type: "round_robin",
+				settings: {},
+				requiresCheckIn: false,
+			},
+			{
+				id: "2",
+				name: "Final Bracket",
+				type: "single_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketId: "1",
+						placements: "",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("parsing fails with a reversed placement range", () => {
+		const error = Progression.validatedBrackets([
+			{
+				id: "1",
+				name: "Swiss Bracket",
+				type: "swiss",
+				settings: {
+					advanceThreshold: 3,
+				},
+				requiresCheckIn: false,
+			},
+			{
+				id: "2",
+				name: "Final Bracket",
+				type: "single_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketId: "1",
+						placements: "3-1",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("parsing fails with empty string placements for Swiss brackets without early advance", () => {
+		const error = Progression.validatedBrackets([
+			{
+				id: "1",
+				name: "Swiss Bracket",
+				type: "swiss",
+				settings: {},
+				requiresCheckIn: false,
+			},
+			{
+				id: "2",
+				name: "Final Bracket",
+				type: "single_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketId: "1",
+						placements: "",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+});
+
+describe('validatedSources - rest "N+" syntax', () => {
+	const getValidatedBracketsFromPlacements = (placements: string) => {
+		return Progression.validatedBrackets([
+			{
+				id: "1",
+				name: "Bracket 1",
+				type: "round_robin",
+				settings: { teamsPerGroup: 8 },
+				requiresCheckIn: false,
+			},
+			{
+				id: "2",
+				name: "Bracket 2",
+				type: "single_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketId: "1",
+						placements,
+					},
+				],
+			},
+		]);
+	};
+
+	it("parses lone rest placement", () => {
+		const result = getValidatedBracketsFromPlacements(
+			"5+",
+		) as Progression.ParsedBracket[];
+
+		expect(result[1].sources).toEqual([
+			{ bracketIdx: 0, placements: [5], rest: true },
+		]);
+	});
+
+	it("parses rest from first placement", () => {
+		const result = getValidatedBracketsFromPlacements(
+			"1+",
+		) as Progression.ParsedBracket[];
+
+		expect(result[1].sources).toEqual([
+			{ bracketIdx: 0, placements: [1], rest: true },
+		]);
+	});
+
+	it("parses rest combined with explicit placements", () => {
+		const result = getValidatedBracketsFromPlacements(
+			"1,2,3-4,5+",
+		) as Progression.ParsedBracket[];
+
+		expect(result[1].sources).toEqual([
+			{ bracketIdx: 0, placements: [1, 2, 3, 4, 5], rest: true },
+		]);
+	});
+
+	it("parses range-then-rest as a single element", () => {
+		const result = getValidatedBracketsFromPlacements(
+			"1-5+",
+		) as Progression.ParsedBracket[];
+
+		expect(result[1].sources).toEqual([
+			{ bracketIdx: 0, placements: [1, 2, 3, 4, 5], rest: true },
+		]);
+	});
+
+	it("rejects rest in non-final position", () => {
+		const error = getValidatedBracketsFromPlacements(
+			"5+,6",
+		) as Progression.ValidationError;
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("rejects double plus", () => {
+		const error = getValidatedBracketsFromPlacements(
+			"5++",
+		) as Progression.ValidationError;
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("rejects lone plus", () => {
+		const error = getValidatedBracketsFromPlacements(
+			"+",
+		) as Progression.ValidationError;
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("rejects rest on zero placement", () => {
+		const error = getValidatedBracketsFromPlacements(
+			"0+",
+		) as Progression.ValidationError;
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("rejects rest on negative placement", () => {
+		const error = Progression.validatedBrackets([
+			{
+				id: "1",
+				name: "Bracket 1",
+				type: "double_elimination",
+				settings: {},
+				requiresCheckIn: false,
+			},
+			{
+				id: "2",
+				name: "Bracket 2",
+				type: "single_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketId: "1",
+						placements: "-1+",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+		expect(error.type).toBe("PLACEMENTS_PARSE_ERROR");
+	});
+
+	it("round-trips lone rest via input format", () => {
+		const validated = getValidatedBracketsFromPlacements(
+			"5+",
+		) as Progression.ParsedBracket[];
+		const inputFormat = Progression.validatedBracketsToInputFormat(validated);
+		expect(inputFormat[1].sources?.[0].placements).toBe("5+");
+	});
+
+	it("round-trips combined rest via input format", () => {
+		const validated = getValidatedBracketsFromPlacements(
+			"1,2,3-4,5+",
+		) as Progression.ParsedBracket[];
+		const inputFormat = Progression.validatedBracketsToInputFormat(validated);
+		expect(inputFormat[1].sources?.[0].placements).toBe("1-4,5+");
+	});
+
+	it("destinationByPlacement routes placements beyond the rest threshold", () => {
+		const validated = getValidatedBracketsFromPlacements(
+			"5+",
+		) as Progression.ParsedBracket[];
+		expect(
+			Progression.destinationByPlacement({
+				sourceBracketIdx: 0,
+				placement: 10,
+				progression: validated,
+			}),
+		).toBe(1);
+		expect(
+			Progression.destinationByPlacement({
+				sourceBracketIdx: 0,
+				placement: 4,
+				progression: validated,
+			}),
+		).toBe(null);
+	});
+
+	it("flags SAME_PLACEMENT_TO_MULTIPLE_BRACKETS when two rest sources share a bracket", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: { teamsPerGroup: 8 },
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "1-4" }],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "5+" }],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "6+" }],
+			},
+		]) as Progression.ValidationError;
+		expect(error.type).toBe("SAME_PLACEMENT_TO_MULTIPLE_BRACKETS");
+	});
+
+	it("flags SAME_PLACEMENT_TO_MULTIPLE_BRACKETS when rest overlaps an explicit placement", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: { teamsPerGroup: 8 },
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "1-4,5+" }],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "7" }],
+			},
+		]) as Progression.ValidationError;
+		expect(error.type).toBe("SAME_PLACEMENT_TO_MULTIPLE_BRACKETS");
+	});
+
+	it("still flags TOO_MANY_PLACEMENTS when rest's explicit max exceeds teamsPerGroup", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: { teamsPerGroup: 4 },
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "1-4" }],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "5+" }],
+			},
+		]) as Progression.ValidationError;
+		expect(error.type).toBe("TOO_MANY_PLACEMENTS");
+	});
 });
 
 const getValidatedBrackets = (
@@ -191,22 +525,36 @@ const getValidatedBrackets = (
 	);
 
 describe("validatedSources - other rules", () => {
-	it("handles NOT_RESOLVING_WINNER (only round robin)", () => {
-		const error = getValidatedBrackets([
+	it("accepts a single round robin with no follow-ups", () => {
+		const result = getValidatedBrackets([
 			{
 				settings: {},
 				type: "round_robin",
 			},
-		]) as Progression.ValidationError;
+		]);
 
-		expect(error.type).toBe("NOT_RESOLVING_WINNER");
+		expect(Array.isArray(result)).toBe(true);
 	});
 
-	it("handles NOT_RESOLVING_WINNER (ends in round robin)", () => {
-		const error = getValidatedBrackets([
+	it("accepts a single A/B round robin with no follow-ups", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+					teamsPerGroup: 6,
+				},
+				type: "round_robin",
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("accepts a swiss to round robin progression", () => {
+		const result = getValidatedBrackets([
 			{
 				settings: {},
-				type: "single_elimination",
+				type: "swiss",
 			},
 			{
 				settings: {},
@@ -218,9 +566,30 @@ describe("validatedSources - other rules", () => {
 					},
 				],
 			},
-		]) as Progression.ValidationError;
+		]);
 
-		expect(error.type).toBe("NOT_RESOLVING_WINNER");
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("accepts a round robin to round robin progression", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: {},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "round_robin",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1,2",
+					},
+				],
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
 	});
 
 	it("handles NOT_RESOLVING_WINNER (swiss with many groups)", () => {
@@ -300,6 +669,49 @@ describe("validatedSources - other rules", () => {
 		expect((error as any).bracketIdxs).toEqual([1, 2]);
 	});
 
+	it("only flags GAP_IN_PLACEMENTS brackets sourcing from the problematic bracket", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: {},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1",
+					},
+				],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "3",
+					},
+				],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "1",
+						placements: "1",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("GAP_IN_PLACEMENTS");
+		// bracket 3 sources from bracket 1, not from the gap in bracket 0
+		expect((error as any).bracketIdxs).toEqual([1, 2]);
+	});
+
 	it("handles TOO_MANY_PLACEMENTS", () => {
 		const error = getValidatedBrackets([
 			{
@@ -322,6 +734,108 @@ describe("validatedSources - other rules", () => {
 
 		expect(error.type).toBe("TOO_MANY_PLACEMENTS");
 		expect((error as any).bracketIdx).toEqual(1);
+	});
+
+	it("handles PLACEMENT_TOO_HIGH", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: { teamsPerGroup: 200 },
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "1-101" }],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("PLACEMENT_TOO_HIGH");
+		expect((error as any).bracketIdx).toEqual(1);
+	});
+
+	it("does not flag PLACEMENT_TOO_HIGH at the max boundary", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: { teamsPerGroup: 200 },
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "1-100" }],
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("does not flag TOO_MANY_PLACEMENTS when larger round robin has valid high placements", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: { teamsPerGroup: 6 },
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [{ bracketId: "0", placements: "1,2,3,4,5,6" }],
+			},
+			{
+				settings: { teamsPerGroup: 4 },
+				type: "round_robin",
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("flags TOO_MANY_PLACEMENTS on A/B divisions when placement exceeds per-division size", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+					teamsPerGroup: 6,
+				},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1,2,3,4",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("TOO_MANY_PLACEMENTS");
+		expect((error as any).bracketIdx).toEqual(1);
+	});
+
+	it("accepts A/B divisions placements up to per-division size", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+					teamsPerGroup: 6,
+				},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1,2,3",
+					},
+				],
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
 	});
 
 	it("handles DUPLICATE_BRACKET_NAME", () => {
@@ -446,6 +960,245 @@ describe("validatedSources - other rules", () => {
 		expect(error.type).toBe("NO_DE_POSITIVE");
 		expect((error as any).bracketIdx).toEqual(1);
 	});
+
+	it("handles SWISS_EARLY_ADVANCE_NO_DESTINATION", () => {
+		// Swiss bracket with early advance but no destination
+		const error = getValidatedBrackets([
+			{
+				settings: {
+					advanceThreshold: 3,
+				},
+				type: "swiss",
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("SWISS_EARLY_ADVANCE_NO_DESTINATION");
+		expect((error as any).bracketIdx).toEqual(0);
+	});
+
+	it("allows Swiss early advance when bracket has destination", () => {
+		// Swiss bracket with early advance that leads to another bracket should be valid
+		const result = getValidatedBrackets([
+			{
+				settings: {
+					advanceThreshold: 3,
+				},
+				type: "swiss",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-4",
+					},
+				],
+			},
+		]);
+
+		// Should be valid (no error returned)
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("accepts A/B divisions on a round robin starting bracket with even teamsPerGroup", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+					teamsPerGroup: 6,
+				},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-2",
+					},
+				],
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("handles AB_DIVISIONS_NOT_ROUND_ROBIN", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+				},
+				type: "swiss",
+				name: "Swiss",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				name: "Finals",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-2",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("AB_DIVISIONS_NOT_ROUND_ROBIN");
+		expect((error as any).bracketIdx).toEqual(0);
+	});
+
+	it("handles AB_DIVISIONS_NOT_STARTING", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: {},
+				type: "round_robin",
+				name: "Group stage",
+			},
+			{
+				settings: {
+					hasAbDivisions: true,
+					teamsPerGroup: 4,
+				},
+				type: "round_robin",
+				name: "Second RR",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-2",
+					},
+				],
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				name: "Finals",
+				sources: [
+					{
+						bracketId: "1",
+						placements: "1-2",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("AB_DIVISIONS_NOT_STARTING");
+		expect((error as any).bracketIdx).toEqual(1);
+	});
+
+	it("handles AB_DIVISIONS_ODD_TEAMS_PER_GROUP", () => {
+		const error = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+					teamsPerGroup: 5,
+				},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-2",
+					},
+				],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("AB_DIVISIONS_ODD_TEAMS_PER_GROUP");
+		expect((error as any).bracketIdx).toEqual(0);
+	});
+
+	it("accepts A/B divisions when teamsPerGroup is unset (default is even)", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: {
+					hasAbDivisions: true,
+				},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-2",
+					},
+				],
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("does not apply A/B validation when hasAbDivisions is absent", () => {
+		const result = getValidatedBrackets([
+			{
+				settings: {
+					teamsPerGroup: 5,
+				},
+				type: "round_robin",
+			},
+			{
+				settings: {},
+				type: "single_elimination",
+				sources: [
+					{
+						bracketId: "0",
+						placements: "1-2",
+					},
+				],
+			},
+		]);
+
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("handles EMPTY_PLACEMENTS_ON_NON_SWISS (DE source with empty placements)", () => {
+		const error = Progression.bracketsToValidationError([
+			{
+				name: "Bracket 1",
+				type: "double_elimination",
+				settings: {},
+				requiresCheckIn: false,
+			},
+			{
+				name: "Bracket 2",
+				type: "double_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [{ bracketIdx: 0, placements: [] }],
+			},
+		]) as Progression.ValidationError;
+
+		expect(error.type).toBe("EMPTY_PLACEMENTS_ON_NON_SWISS");
+	});
+
+	it("allows empty placements when source is Swiss with advanceThreshold", () => {
+		const result = Progression.bracketsToValidationError([
+			{
+				name: "Swiss",
+				type: "swiss",
+				settings: { advanceThreshold: 3 },
+				requiresCheckIn: false,
+			},
+			{
+				name: "Finals",
+				type: "double_elimination",
+				settings: {},
+				requiresCheckIn: false,
+				sources: [{ bracketIdx: 0, placements: [] }],
+			},
+		]);
+
+		expect(result).toBeNull();
+	});
 });
 
 describe("isFinals", () => {
@@ -467,6 +1220,10 @@ describe("isFinals", () => {
 		expect(Progression.isFinals(1, progressions.lowInk)).toBe(false);
 		expect(Progression.isFinals(2, progressions.lowInk)).toBe(false);
 		expect(Progression.isFinals(3, progressions.lowInk)).toBe(true);
+	});
+
+	it("handles swiss (early advance", () => {
+		expect(Progression.isFinals(1, progressions.swissEarlyAdvance)).toBe(true);
 	});
 
 	it("many starter brackets", () => {
@@ -511,13 +1268,13 @@ describe("isUnderground", () => {
 			false,
 		);
 		expect(Progression.isUnderground(1, progressions.manyStartBrackets)).toBe(
-			true,
+			false,
 		);
 		expect(Progression.isUnderground(2, progressions.manyStartBrackets)).toBe(
 			false,
 		);
 		expect(Progression.isUnderground(3, progressions.manyStartBrackets)).toBe(
-			true,
+			false,
 		);
 	});
 
@@ -593,6 +1350,26 @@ describe("bracketIdxsForStandings", () => {
 	});
 });
 
+describe("startingBrackets", () => {
+	it("handles SE", () => {
+		expect(
+			Progression.startingBrackets(progressions.singleElimination),
+		).toEqual([0]);
+	});
+
+	it("handles many starter brackets", () => {
+		expect(
+			Progression.startingBrackets(progressions.manyStartBrackets),
+		).toEqual([0, 1]);
+	});
+
+	it("handles swiss (one group)", () => {
+		expect(Progression.startingBrackets(progressions.swissOneGroup)).toEqual([
+			0,
+		]);
+	});
+});
+
 describe("destinationsFromBracketIdx", () => {
 	it("returns correct destination (one destination)", () => {
 		expect(
@@ -651,5 +1428,89 @@ describe("destinationByPlacement", () => {
 			progression: progressions.manyStartBrackets,
 		});
 		expect(result).toBe(3);
+	});
+});
+
+describe("validatedBracketsToInputFormat", () => {
+	it("converts empty placements back to empty string", () => {
+		const parsedBrackets: Progression.ParsedBracket[] = [
+			{
+				type: "swiss",
+				settings: { advanceThreshold: 3 },
+				name: "Swiss Bracket",
+				requiresCheckIn: false,
+			},
+			{
+				type: "single_elimination",
+				settings: {},
+				name: "Final Bracket",
+				requiresCheckIn: false,
+				sources: [
+					{
+						bracketIdx: 0,
+						placements: [],
+					},
+				],
+			},
+		];
+
+		const result = Progression.validatedBracketsToInputFormat(parsedBrackets);
+
+		expect(result[1].sources).toEqual([
+			{
+				bracketId: "0",
+				placements: "",
+			},
+		]);
+	});
+});
+
+describe("bracketDepth", () => {
+	it("returns 0 for starting bracket with no sources", () => {
+		expect(Progression.bracketDepth(0, progressions.singleElimination)).toBe(0);
+	});
+
+	it("returns 0 for starting bracket and 1 for bracket sourced from it", () => {
+		expect(
+			Progression.bracketDepth(0, progressions.roundRobinToSingleElimination),
+		).toBe(0);
+		expect(
+			Progression.bracketDepth(1, progressions.roundRobinToSingleElimination),
+		).toBe(1);
+	});
+
+	it("handles complex progression with multiple depth levels", () => {
+		expect(Progression.bracketDepth(0, progressions.lowInk)).toBe(0);
+		expect(Progression.bracketDepth(1, progressions.lowInk)).toBe(1);
+		expect(Progression.bracketDepth(2, progressions.lowInk)).toBe(1);
+		expect(Progression.bracketDepth(3, progressions.lowInk)).toBe(2);
+	});
+
+	it("handles multiple starting brackets", () => {
+		expect(Progression.bracketDepth(0, progressions.manyStartBrackets)).toBe(0);
+		expect(Progression.bracketDepth(1, progressions.manyStartBrackets)).toBe(0);
+		expect(Progression.bracketDepth(2, progressions.manyStartBrackets)).toBe(1);
+		expect(Progression.bracketDepth(3, progressions.manyStartBrackets)).toBe(1);
+	});
+
+	it("handles underground brackets", () => {
+		expect(
+			Progression.bracketDepth(
+				0,
+				progressions.doubleEliminationWithUnderground,
+			),
+		).toBe(0);
+		expect(
+			Progression.bracketDepth(
+				1,
+				progressions.doubleEliminationWithUnderground,
+			),
+		).toBe(1);
+	});
+
+	it("throws if given idx is out of bounds", () => {
+		expect(() =>
+			Progression.bracketDepth(1, progressions.singleElimination),
+		).toThrow();
 	});
 });

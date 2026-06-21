@@ -1,4 +1,4 @@
-import { useSearchParams } from "@remix-run/react";
+import { useSearchParams } from "react-router";
 import { abilities } from "~/modules/in-game-lists/abilities";
 import type {
 	Ability,
@@ -23,7 +23,7 @@ import {
 export function useAnalyzeBuild() {
 	const [searchParams, setSearchParams] = useSearchParams();
 
-	const mainWeaponId = validatedWeaponIdFromSearchParams(searchParams);
+	const mainWeaponId = validatedWeaponIdFromSearchParams(searchParams) ?? 0;
 	const build = validatedBuildFromSearchParams(searchParams);
 	const build2 = validatedBuildFromSearchParams(searchParams, "build2", build);
 	const ldeIntensity = validatedLdeIntensityFromSearchParams(searchParams);

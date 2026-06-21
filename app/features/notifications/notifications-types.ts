@@ -62,8 +62,34 @@ export type Notification =
 	  >
 	| NotificationItem<"SEASON_STARTED", { seasonNth: number }>
 	| NotificationItem<"SCRIM_NEW_REQUEST", { fromUsername: string }>
-	| NotificationItem<"SCRIM_SCHEDULED", { id: number; at: number }>
-	| NotificationItem<"SCRIM_CANCELED", { id: number; at: number }>;
+	| NotificationItem<
+			"SCRIM_SCHEDULED",
+			{ id: number; opponentTeamName: string }
+	  >
+	| NotificationItem<"SCRIM_CANCELED", { id: number; opponentTeamName: string }>
+	| NotificationItem<
+			"SCRIM_STARTING_SOON",
+			{ id: number; opponentTeamName: string }
+	  >
+	| NotificationItem<"SCRIM_AUTO_DELETED", { at: number }>
+	| NotificationItem<"COMMISSIONS_CLOSED", { discordId: string }>
+	| NotificationItem<"FRIEND_REQUEST_RECEIVED", { senderUsername: string }>
+	| NotificationItem<
+			"TO_LIKE_RECEIVED",
+			{
+				tournamentId: number;
+				tournamentName: string;
+				likerUsername: string;
+			}
+	  >
+	| NotificationItem<
+			"TO_LIKE_ACCEPTED",
+			{
+				tournamentId: number;
+				tournamentName: string;
+				accepterUsername: string;
+			}
+	  >;
 
 type NotificationItem<
 	T extends string,

@@ -1,16 +1,17 @@
-import type { SerializeFrom } from "@remix-run/node";
+import clsx from "clsx";
+import { User } from "lucide-react";
 import { Avatar } from "~/components/Avatar";
-import { UserIcon } from "~/components/icons/User";
+import type { Tournament } from "~/features/tournament-bracket/core/Tournament";
 import { twitchThumbnailUrlToSrc } from "~/modules/twitch/utils";
 import { twitchUrl } from "~/utils/urls";
-import type { TournamentStreamsLoader } from "../loaders/to.$id.streams.server";
 import { useTournament } from "../routes/to.$id";
+import styles from "../tournament.module.css";
 
 export function TournamentStream({
 	stream,
 	withThumbnail = true,
 }: {
-	stream: SerializeFrom<TournamentStreamsLoader>["streams"][number];
+	stream: Tournament["streams"][number];
 	withThumbnail?: boolean;
 }) {
 	const tournament = useTournament();
@@ -20,7 +21,11 @@ export function TournamentStream({
 	const user = team?.members.find((m) => m.userId === stream.userId);
 
 	return (
-		<div key={stream.userId} className="stack sm">
+		<div
+			key={stream.userId}
+			className="stack sm"
+			data-testid="tournament-stream"
+		>
 			{withThumbnail ? (
 				<a
 					href={twitchUrl(stream.twitchUserName)}
@@ -37,18 +42,23 @@ export function TournamentStream({
 			) : null}
 			<div className="stack md horizontal justify-between">
 				{user && team ? (
-					<div className="tournament__stream__user-container">
+					<div className={styles.streamUserContainer}>
 						<Avatar size="xxs" user={user} /> {user.username}
-						<span className="text-theme-secondary">{team.name}</span>
+						<span
+							className={clsx("text-theme-secondary", styles.streamTeamName)}
+							title={team.name}
+						>
+							{team.name}
+						</span>
 					</div>
 				) : (
-					<div className="tournament__stream__user-container">
-						<Avatar size="xxs" url={tournament.logoSrc} />
+					<div className={styles.streamUserContainer}>
+						<Avatar size="xxs" url={tournament.ctx.logoUrl} />
 						Cast <span className="text-lighter">{stream.twitchUserName}</span>
 					</div>
 				)}
-				<div className="tournament__stream__viewer-count">
-					<UserIcon />
+				<div className={styles.streamViewerCount}>
+					<User />
 					{stream.viewerCount}
 				</div>
 			</div>

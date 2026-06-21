@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { TriangleAlert } from "lucide-react";
 import {
 	Tab,
 	TabList,
@@ -9,6 +10,7 @@ import {
 	Tabs,
 	type TabsProps,
 } from "react-aria-components";
+import { useMainContentWidth } from "~/hooks/useMainContentWidth";
 
 import buttonStyles from "./Button.module.css";
 import styles from "./Tabs.module.css";
@@ -18,6 +20,8 @@ interface SendouTabsProps extends TabsProps {
 	padded?: boolean;
 	/** Hide tabs if only one tab shown? Defaults to true. */
 	disappearing?: boolean;
+	/** When orientation is "vertical", switch to horizontal once the main content width drops below this many pixels. */
+	horizontalBelow?: number;
 }
 
 /**
@@ -51,14 +55,31 @@ interface SendouTabsProps extends TabsProps {
 export function SendouTabs({
 	padded = true,
 	disappearing = true,
+	horizontalBelow,
 	className,
+	orientation,
+	onSelectionChange,
 	...rest
 }: SendouTabsProps) {
+	const mainWidth = useMainContentWidth();
+	const collapsedToHorizontal =
+		orientation === "vertical" &&
+		typeof horizontalBelow === "number" &&
+		mainWidth > 0 &&
+		mainWidth < horizontalBelow;
+	const effectiveOrientation = collapsedToHorizontal
+		? "horizontal"
+		: orientation;
+	const isVertical = effectiveOrientation === "vertical";
+
 	return (
 		<Tabs
-			className={clsx(className, {
+			orientation={effectiveOrientation}
+			onSelectionChange={onSelectionChange}
+			className={clsx(className, styles.root, {
 				[styles.padded]: padded,
 				[styles.disappearing]: disappearing,
+				[styles.vertical]: isVertical,
 			})}
 			{...rest}
 		/>
@@ -68,42 +89,55 @@ export function SendouTabs({
 interface SendouTabProps extends TabProps {
 	icon?: React.ReactNode;
 	number?: number;
+	/** Render a warning-colored alert icon to draw attention to this tab. */
+	alert?: boolean;
 	children?: React.ReactNode;
 }
 
-export function SendouTab({ icon, children, number, ...rest }: SendouTabProps) {
+export function SendouTab({
+	icon,
+	children,
+	number,
+	alert,
+	...rest
+}: SendouTabProps) {
 	return (
-		<Tab className={clsx(buttonStyles.button, styles.tabButton)} {...rest}>
-			{icon}
-			{children}
-			{typeof number === "number" && number !== 0 && (
-				<span className={styles.tabNumber}>{number}</span>
-			)}
+		<Tab className={styles.tabContainer} {...rest}>
+			<div className={clsx(buttonStyles.button, styles.tabButton)}>
+				{icon}
+				{children}
+				{typeof number === "number" && number !== 0 && (
+					<span className={styles.tabNumber}>{number}</span>
+				)}
+				{alert ? <TriangleAlert className={styles.tabAlert} /> : null}
+			</div>
 		</Tab>
 	);
 }
 
 interface SendouTabListProps<T extends object> extends TabListProps<T> {
-	/** Should overflow-x: auto CSS rule be applied? Defaults to true */
-	scrolling?: boolean;
 	sticky?: boolean;
+	/** Should tabs take 100% width with equal distribution? */
+	fullWidth?: boolean;
 }
 
 export function SendouTabList<T extends object>({
-	scrolling = true,
 	sticky,
+	fullWidth,
 	...rest
 }: SendouTabListProps<T>) {
 	return (
-		<TabList
-			className={clsx(styles.tabList, {
-				"overflow-x-auto": scrolling,
-				// invisible: cantSwitchTabs && !disappearing,
-				// hidden: cantSwitchTabs && disappearing,
-				[styles.sticky]: sticky,
-			})}
-			{...rest}
-		/>
+		<div className={clsx(styles.tabListContainer, "scrollbar")}>
+			<TabList
+				className={clsx(styles.tabList, {
+					// invisible: cantSwitchTabs && !disappearing,
+					// hidden: cantSwitchTabs && disappearing,
+					[styles.sticky]: sticky,
+					[styles.fullWidth]: fullWidth,
+				})}
+				{...rest}
+			/>
+		</div>
 	);
 }
 

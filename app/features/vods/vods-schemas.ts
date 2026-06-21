@@ -1,11 +1,25 @@
 import { add } from "date-fns";
-import { z } from "zod/v4";
+import { z } from "zod";
+import {
+	array,
+	customField,
+	dayMonthYearRequired,
+	fieldset,
+	idConstantOptional,
+	radioGroup,
+	select,
+	selectOptional,
+	stageSelect,
+	textFieldRequired,
+	weaponPool,
+	weaponSelectOptional,
+} from "~/form/fields";
+import { modesShort } from "~/modules/in-game-lists/modes";
 import {
 	dayMonthYear,
 	id,
 	modeShort,
 	nonEmptyString,
-	safeJSONParse,
 	stageId,
 	weaponSplId,
 } from "~/utils/zod";
@@ -15,7 +29,19 @@ import { extractYoutubeIdFromVideoUrl } from "./vods-utils";
 
 export const HOURS_MINUTES_SECONDS_REGEX = /^(\d{1,2}:)?\d{1,2}:\d{2}$/;
 
-export const videoMatchSchema = z.object({
+export const vodsSearchParamsSchema = z.object({
+	page: z.coerce.number().min(1).max(1_000).catch(1),
+	weapon: weaponSplId.optional().catch(undefined),
+	mode: modeShort.optional().catch(undefined),
+	stageId: stageId.optional().catch(undefined),
+	type: z.enum(videoMatchTypes).optional().catch(undefined),
+});
+
+export const userVodsSearchParamsSchema = z.object({
+	page: z.coerce.number().min(1).max(1_000).catch(1),
+});
+
+const videoMatchSchema = z.object({
 	startsAt: z.string().regex(HOURS_MINUTES_SECONDS_REGEX, {
 		message: "Invalid time format. Use HH:MM:SS or MM:SS",
 	}),
@@ -63,28 +89,110 @@ export const videoSchema = z.preprocess(
 					}),
 				])
 				.optional(),
+			teamSize: z.number().int().min(1).max(4).optional(),
 			matches: z.array(videoMatchSchema),
 		})
 		.refine((data) => {
-			if (
-				data.type === "CAST" &&
-				data.matches.some((match) => match.weapons.length !== 8)
-			) {
-				return false;
+			if (data.type === "CAST") {
+				const teamSize = data.teamSize ?? 4;
+				return data.matches.every(
+					(match) => match.weapons.length === teamSize * 2,
+				);
 			}
 
-			if (
-				data.type !== "CAST" &&
-				data.matches.some((match) => match.weapons.length !== 1)
-			) {
-				return false;
-			}
-
-			return true;
+			return data.matches.every((match) => match.weapons.length === 1);
 		}),
 );
 
-export const videoInputSchema = z.object({
-	video: z.preprocess(safeJSONParse, videoSchema),
-	vodToEditId: id.optional(),
+const povSchema = z.union([
+	z.object({
+		type: z.literal("USER"),
+		userId: id.optional(),
+	}),
+	z.object({
+		type: z.literal("NAME"),
+		name: nonEmptyString.max(100),
+	}),
+]);
+
+const matchFieldsetSchema = z.object({
+	startsAt: textFieldRequired({
+		label: "labels.vodStartTimestamp",
+		maxLength: 10,
+		regExp: {
+			pattern: HOURS_MINUTES_SECONDS_REGEX,
+			message: "Invalid time format. Use HH:MM:SS or MM:SS",
+		},
+	}),
+	mode: radioGroup({
+		label: "labels.vodMode",
+		items: modesShort.map((mode) => ({
+			label: `modes.${mode}` as const,
+			value: mode,
+		})),
+	}),
+	stageId: stageSelect({ label: "labels.vodStage" }),
+	weapon: weaponSelectOptional({ label: "labels.vodWeapon" }),
+	weaponsTeamOne: weaponPool({
+		label: "labels.vodWeaponsTeamOne",
+		maxCount: 4,
+		disableSorting: true,
+		disableFavorites: true,
+		allowDuplicates: true,
+	}),
+	weaponsTeamTwo: weaponPool({
+		label: "labels.vodWeaponsTeamTwo",
+		maxCount: 4,
+		disableSorting: true,
+		disableFavorites: true,
+		allowDuplicates: true,
+	}),
+});
+
+export const vodFormBaseSchema = z.object({
+	vodToEditId: idConstantOptional(),
+	youtubeUrl: textFieldRequired({
+		label: "labels.vodYoutubeUrl",
+		maxLength: 200,
+		validate: {
+			func: (val) => extractYoutubeIdFromVideoUrl(val) !== null,
+			message: "Invalid YouTube URL",
+		},
+	}),
+	title: textFieldRequired({
+		label: "labels.vodTitle",
+		maxLength: 100,
+	}),
+	date: dayMonthYearRequired({
+		label: "labels.vodDate",
+		max: () => add(new Date(), { days: 1 }),
+		maxMessage: "errors.dateMustNotBeFuture",
+		minMessage: "errors.dateTooOld",
+	}),
+	type: select({
+		label: "labels.type",
+		items: videoMatchTypes.map((type) => ({
+			label: `vodTypes.${type}` as const,
+			value: type,
+		})),
+	}),
+	teamSize: selectOptional({
+		label: "labels.vodTeamSize",
+		items: [
+			{ label: () => "1v1", value: "1" },
+			{ label: () => "2v2", value: "2" },
+			{ label: () => "3v3", value: "3" },
+			{ label: () => "4v4", value: "4" },
+		],
+	}),
+	pov: customField(
+		{ initialValue: { type: "USER" as const } },
+		povSchema.optional(),
+	),
+	matches: array({
+		label: "labels.vodMatches",
+		min: 1,
+		max: 50,
+		field: fieldset({ fields: matchFieldsetSchema }),
+	}),
 });

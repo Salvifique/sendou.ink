@@ -1,56 +1,28 @@
 import { sql } from "~/db/sql";
 import type { Tables } from "~/db/tables";
 
+// Window function (latest Skill row per user) rather than a self-join against a
+// `max(id)` subquery: the self-join lets the planner pick a nested-loop plan when
+// it misjudges the season's row count (e.g. a freshly started season whose stats
+// are dwarfed by older seasons), which made this query take ~12s. This form is
+// plan-stable regardless of stats.
 const userStm = sql.prepare(/* sql */ `
-  select
-    "Skill"."ordinal",
-    "Skill"."matchesCount",
-    "Skill"."userId"
-  from
-    "Skill"
-  inner join (
-    select "userId", max("id") as "maxId"
+  select "ordinal", "matchesCount", "userId"
+  from (
+    select
+      "ordinal",
+      "matchesCount",
+      "userId",
+      row_number() over (partition by "userId" order by "id" desc) as "rn"
     from "Skill"
-    where "Skill"."season" = @season
-    group by "userId"
-  ) "Latest" on "Skill"."userId" = "Latest"."userId" and "Skill"."id" = "Latest"."maxId"
-  where
-    "Skill"."season" = @season
-    and "Skill"."userId" is not null
-  order by
-    "Skill"."ordinal" desc
+    where "season" = @season and "userId" is not null
+  )
+  where "rn" = 1
+  order by "ordinal" desc
 `);
 
-const teamStm = sql.prepare(/* sql */ `
-  select
-    "Skill"."ordinal",
-    "Skill"."matchesCount",
-    "Skill"."identifier"
-  from
-    "Skill"
-  inner join (
-    select "identifier", max("id") as "maxId"
-    from "Skill"
-    where "Skill"."season" = @season
-    group by "identifier"
-  ) "Latest" on "Skill"."identifier" = "Latest"."identifier" and "Skill"."id" = "Latest"."maxId"
-  where
-    "Skill"."season" = @season
-    and "Skill"."identifier" is not null
-  order by
-    "Skill"."ordinal" desc
-`);
-
-export function orderedMMRBySeason({
-	season,
-	type,
-}: {
-	season: number;
-	type: "team" | "user";
-}) {
-	const stm = type === "team" ? teamStm : userStm;
-
-	return stm.all({ season }) as Array<
-		Pick<Tables["Skill"], "ordinal" | "matchesCount" | "userId" | "identifier">
+export function orderedUserMMRBySeason(season: number) {
+	return userStm.all({ season }) as Array<
+		Pick<Tables["Skill"], "ordinal" | "matchesCount" | "userId">
 	>;
 }

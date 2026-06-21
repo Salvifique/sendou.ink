@@ -43,6 +43,12 @@ export interface InputStage {
 	/** Contains participants or `null` for BYEs. */
 	seeding?: Seeding;
 
+	/**
+	 * A/B division assignment parallel to `seeding`. `0` = A, `1` = B.
+	 * Required when `settings.hasAbDivisions` is `true`.
+	 */
+	abDivisions?: (0 | 1)[];
+
 	/** Contains optional settings specific to each stage type. */
 	settings?: StageSettings;
 }
@@ -91,11 +97,28 @@ export interface StageSettings {
 	roundRobinMode?: RoundRobinMode;
 
 	/**
+	 * Whether to generate a bipartite round-robin where teams are split into two
+	 * A/B divisions and every match pairs one A team with one B team.
+	 * Only valid on round-robin stages.
+	 */
+	hasAbDivisions?: boolean;
+
+	/**
 	 * A list of seeds per group for a round-robin stage to be manually ordered.
 	 *
 	 * Seed ordering is ignored if this property is given.
 	 */
 	manualOrdering?: number[][];
+
+	/**
+	 * Whether matches in a round-robin stage are playable independently of each other.
+	 *
+	 * - If `false` (default), only round 1 matches start `Ready`; later rounds start
+	 *   `Locked` and unlock as both opponents complete the previous round.
+	 * - If `true`, every match with two opponents starts `Ready` (used by league
+	 *   formats where weeks are scheduled independently and may be played out of order).
+	 */
+	independentRounds?: boolean;
 
 	/**
 	 * Optional final between semi-final losers.

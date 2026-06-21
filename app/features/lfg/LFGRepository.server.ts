@@ -4,7 +4,11 @@ import { jsonArrayFrom, jsonObjectFrom } from "kysely/helpers/sqlite";
 import { db } from "~/db/sql";
 import type { DB, TablesInsertable } from "~/db/tables";
 import { databaseTimestampNow, dateToDatabaseTimestamp } from "~/utils/dates";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
+import {
+	commonUserSelect,
+	concatUserSubmittedImagePrefix,
+	userProfileWeapons,
+} from "~/utils/kysely.server";
 import { LFG } from "./lfg-constants";
 
 export async function posts(user?: { id: number; plusTier: number | null }) {
@@ -21,22 +25,17 @@ export async function posts(user?: { id: number; plusTier: number | null }) {
 			"LFGPost.createdAt",
 			"LFGPost.updatedAt",
 			"LFGPost.plusTierVisibility",
+			"LFGPost.languages",
 			jsonObjectFrom(
 				eb
 					.selectFrom("User")
 					.leftJoin("PlusTier", "PlusTier.userId", "User.id")
 					.select(({ eb: innerEb }) => [
-						...COMMON_USER_FIELDS,
+						...commonUserSelect(innerEb),
 						"User.languages",
 						"User.country",
 						"PlusTier.tier as plusTier",
-						jsonArrayFrom(
-							innerEb
-								.selectFrom("UserWeapon")
-								.whereRef("UserWeapon.userId", "=", "User.id")
-								.orderBy("UserWeapon.order", "asc")
-								.select(["UserWeapon.weaponSplId", "UserWeapon.isFavorite"]),
-						).as("weaponPool"),
+						userProfileWeapons(innerEb).as("weaponPool"),
 					])
 					.whereRef("User.id", "=", "LFGPost.authorId"),
 			).as("author"),
@@ -51,27 +50,20 @@ export async function posts(user?: { id: number; plusTier: number | null }) {
 					.select(({ eb: innerEb }) => [
 						"Team.id",
 						"Team.name",
-						"UserSubmittedImage.url as avatarUrl",
+						concatUserSubmittedImagePrefix(
+							innerEb.ref("UserSubmittedImage.url"),
+						).as("avatarUrl"),
 						jsonArrayFrom(
 							innerEb
 								.selectFrom("TeamMemberWithSecondary")
 								.innerJoin("User", "User.id", "TeamMemberWithSecondary.userId")
 								.leftJoin("PlusTier", "PlusTier.userId", "User.id")
 								.select(({ eb: innestEb }) => [
-									...COMMON_USER_FIELDS,
+									...commonUserSelect(innestEb),
 									"User.languages",
 									"User.country",
 									"PlusTier.tier as plusTier",
-									jsonArrayFrom(
-										innestEb
-											.selectFrom("UserWeapon")
-											.whereRef("UserWeapon.userId", "=", "User.id")
-											.orderBy("UserWeapon.order", "asc")
-											.select([
-												"UserWeapon.weaponSplId",
-												"UserWeapon.isFavorite",
-											]),
-									).as("weaponPool"),
+									userProfileWeapons(innestEb).as("weaponPool"),
 								])
 								.whereRef("TeamMemberWithSecondary.teamId", "=", "Team.id"),
 						).as("members"),
@@ -81,6 +73,7 @@ export async function posts(user?: { id: number; plusTier: number | null }) {
 		])
 		.orderBy(sql`LFGPost.authorId = ${sql`${userId}`} desc`)
 		.orderBy("LFGPost.updatedAt", "desc")
+		.orderBy("LFGPost.type", "asc")
 		.where((eb) =>
 			eb.or([
 				eb(
@@ -123,6 +116,7 @@ export function updatePost(
 			timezone: args.timezone,
 			type: args.type,
 			plusTierVisibility: args.plusTierVisibility,
+			languages: args.languages,
 			updatedAt: dateToDatabaseTimestamp(new Date()),
 		})
 		.where("id", "=", postId)
@@ -147,5 +141,14 @@ export function deletePostsByTeamId(teamId: number, trx?: Transaction<DB>) {
 	return (trx ?? db)
 		.deleteFrom("LFGPost")
 		.where("teamId", "=", teamId)
+		.execute();
+}
+
+export async function findByAuthorUserId(authorId: number) {
+	return db
+		.selectFrom("LFGPost")
+		.select(["id", "type"])
+		.where("authorId", "=", authorId)
+		.orderBy("updatedAt", "desc")
 		.execute();
 }

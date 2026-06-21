@@ -1,11 +1,19 @@
 import { add } from "date-fns";
 import type { InferResult } from "kysely";
+import { sql } from "kysely";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
 import * as R from "remeda";
 import { db } from "~/db/sql";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
+import type { Tables } from "~/db/tables";
+import type {
+	MainWeaponId,
+	RankedModeShort,
+} from "~/modules/in-game-lists/types";
+import {
+	commonUserSelect,
+	concatUserSubmittedImagePrefix,
+} from "~/utils/kysely.server";
 import { dateToDatabaseTimestamp } from "../../utils/dates";
-import invariant from "../../utils/invariant";
 import * as Seasons from "../mmr/core/Seasons";
 import { ordinalToSp } from "../mmr/mmr-utils";
 import {
@@ -54,7 +62,7 @@ const teamLeaderboardBySeasonQuery = (season: number) =>
 				eb
 					.selectFrom("SkillTeamUser")
 					.innerJoin("User", "SkillTeamUser.userId", "User.id")
-					.select(COMMON_USER_FIELDS)
+					.select((eb) => commonUserSelect(eb))
 					.whereRef("SkillTeamUser.skillId", "=", "Skill.id"),
 			).as("members"),
 			jsonArrayFrom(
@@ -72,10 +80,12 @@ const teamLeaderboardBySeasonQuery = (season: number) =>
 						"UserSubmittedImage.id",
 						"Team.avatarImgId",
 					)
-					.select([
+					.select((eb) => [
 						"Team.id",
 						"Team.name",
-						"UserSubmittedImage.url as avatarUrl",
+						concatUserSubmittedImagePrefix(eb.ref("UserSubmittedImage.url")).as(
+							"avatarUrl",
+						),
 						"Team.customUrl",
 						"TeamMemberWithSecondary.isMainTeam",
 						"TeamMemberWithSecondary.userId",
@@ -129,10 +139,34 @@ async function filterOutNonSqPlayers(args: {
 }
 
 async function userIdsWithEnoughSqMatchesForTeamLeaderboard(seasonNth: number) {
-	const season = Seasons.nthToDateRange(seasonNth);
-	invariant(season, "Season not found in sqMatchCountByUserId");
+	// a Skill row with groupMatchId set exists exactly once per user per
+	// completed (not canceled) SendouQ match of the season
+	const rows = await db
+		.selectFrom("Skill")
+		.select("userId")
+		.where("season", "=", seasonNth)
+		.where("groupMatchId", "is not", null)
+		.where("userId", "is not", null)
+		.groupBy("userId")
+		.having(
+			(eb) => eb.fn.countAll(),
+			">=",
+			MATCHES_COUNT_NEEDED_FOR_LEADERBOARD,
+		)
+		.$narrowType<{ userId: number }>()
+		.execute();
 
-	const userIds = await db
+	return rows.map((row) => row.userId);
+}
+
+export async function userHasEnoughSqMatches(userId: number) {
+	const season = Seasons.currentOrPrevious();
+	if (!season) return false;
+
+	const dateRange = Seasons.nthToDateRange(season.nth);
+	if (!dateRange) return false;
+
+	const rows = await db
 		.selectFrom("GroupMatch")
 		.innerJoin("GroupMember", (join) =>
 			join.on((eb) =>
@@ -142,31 +176,26 @@ async function userIdsWithEnoughSqMatchesForTeamLeaderboard(seasonNth: number) {
 				]),
 			),
 		)
-		// this join is needed to filter out canceled matches
 		.innerJoin("Skill", (join) =>
 			join
 				.onRef("Skill.groupMatchId", "=", "GroupMatch.id")
 				.onRef("Skill.userId", "=", "GroupMember.userId"),
 		)
-		.select("GroupMember.userId")
-		.where("GroupMatch.createdAt", ">", dateToDatabaseTimestamp(season.starts))
+		.where("GroupMember.userId", "=", userId)
+		.where(
+			"GroupMatch.createdAt",
+			">",
+			dateToDatabaseTimestamp(dateRange.starts),
+		)
 		.where(
 			"GroupMatch.createdAt",
 			"<",
-			dateToDatabaseTimestamp(add(season.ends, { days: 1 })), // some matches can be finished after the season ends
+			dateToDatabaseTimestamp(add(dateRange.ends, { days: 1 })),
 		)
-		.execute();
+		.select(db.fn.countAll<number>().as("count"))
+		.executeTakeFirstOrThrow();
 
-	const countsMap = new Map<number, number>();
-
-	for (const { userId } of userIds) {
-		const count = countsMap.get(userId) ?? 0;
-		countsMap.set(userId, count + 1);
-	}
-
-	return Array.from(countsMap.entries())
-		.filter(([_userId, count]) => count >= MATCHES_COUNT_NEEDED_FOR_LEADERBOARD)
-		.map(([userId]) => userId);
+	return rows.count >= MATCHES_COUNT_NEEDED_FOR_LEADERBOARD;
 }
 
 function filterOneEntryPerUser(
@@ -237,9 +266,201 @@ export async function seasonsParticipatedInByUserId(userId: number) {
 		.selectFrom("Skill")
 		.select("season")
 		.where("userId", "=", userId)
+		.where(({ or, eb }) =>
+			or([
+				eb("groupMatchId", "is not", null),
+				eb("tournamentId", "is not", null),
+			]),
+		)
 		.groupBy("season")
 		.orderBy("season", "desc")
 		.execute();
 
 	return rows.map((row) => row.season);
+}
+
+export type XPLeaderboardItem = Awaited<
+	ReturnType<typeof allXPLeaderboard>
+>[number];
+
+function xpLeaderboardQuery(where?: {
+	mode?: RankedModeShort;
+	weaponSplId?: MainWeaponId;
+}) {
+	// aggregating before joining keeps the group-by an index-only scan and the
+	// player/user joins limited to one lookup per player instead of per placement
+	return db
+		.selectFrom((eb) => {
+			let placements = eb
+				.selectFrom("XRankPlacement")
+				.select(({ fn }) => [
+					"XRankPlacement.id as entryId",
+					"XRankPlacement.playerId",
+					"XRankPlacement.weaponSplId",
+					"XRankPlacement.name",
+					fn.max("XRankPlacement.power").as("power"),
+				])
+				.groupBy("XRankPlacement.playerId");
+
+			if (where?.mode) {
+				placements = placements.where("XRankPlacement.mode", "=", where.mode);
+			}
+
+			if (typeof where?.weaponSplId === "number") {
+				placements = placements.where(
+					"XRankPlacement.weaponSplId",
+					"=",
+					where.weaponSplId,
+				);
+			}
+
+			return placements.as("Placement");
+		})
+		.innerJoin("SplatoonPlayer", "SplatoonPlayer.id", "Placement.playerId")
+		.leftJoin("User", "User.id", "SplatoonPlayer.userId")
+		.select((eb) => [
+			...commonUserSelect(eb),
+			"Placement.entryId",
+			"Placement.playerId",
+			"Placement.weaponSplId",
+			"Placement.name",
+			"Placement.power",
+			sql<number>`rank() over (order by "Placement"."power" desc)`.as(
+				"placementRank",
+			),
+		])
+		.orderBy("Placement.power", "desc")
+		.limit(DEFAULT_LEADERBOARD_MAX_SIZE);
+}
+
+export async function allXPLeaderboard() {
+	return xpLeaderboardQuery().execute();
+}
+
+export async function modeXPLeaderboard(mode: RankedModeShort) {
+	return xpLeaderboardQuery({ mode }).execute();
+}
+
+export async function weaponXPLeaderboard(weaponSplId: MainWeaponId) {
+	return xpLeaderboardQuery({ weaponSplId }).execute();
+}
+
+export type UserSPLeaderboardItem = Awaited<
+	ReturnType<typeof userSPLeaderboard>
+>[number];
+
+export async function userSPLeaderboard(season: number) {
+	const rows = await db
+		.selectFrom("Skill")
+		.innerJoin("User", "User.id", "Skill.userId")
+		.innerJoin(
+			(eb) =>
+				eb
+					.selectFrom("Skill as InnerSkill")
+					.select(({ fn }) => [
+						"InnerSkill.userId",
+						fn.max("InnerSkill.id").as("maxId"),
+					])
+					.where("season", "=", season)
+					.groupBy("InnerSkill.userId")
+					.as("Latest"),
+			(join) =>
+				join
+					.onRef("Latest.userId", "=", "Skill.userId")
+					.onRef("Latest.maxId", "=", "Skill.id"),
+		)
+		.select((eb) => [
+			...commonUserSelect(eb),
+			"Skill.id as entryId",
+			"Skill.ordinal",
+			"User.plusSkippedForSeasonNth",
+			sql<number>`rank() over (order by "Skill"."ordinal" desc)`.as(
+				"placementRank",
+			),
+		])
+		.where("Skill.userId", "is not", null)
+		.where("Skill.matchesCount", ">=", MATCHES_COUNT_NEEDED_FOR_LEADERBOARD)
+		.where("Skill.season", "=", season)
+		.orderBy("Skill.ordinal", "desc")
+		.execute();
+
+	return rows.map(({ ordinal, ...rest }) => ({
+		...rest,
+		pendingPlusTier: null as number | null,
+		power: ordinalToSp(ordinal),
+	}));
+}
+
+export type SeasonPopularUsersWeapon = Record<
+	Tables["User"]["id"],
+	MainWeaponId
+>;
+
+export async function seasonPopularUsersWeapon(
+	season: number,
+): Promise<SeasonPopularUsersWeapon> {
+	const { starts, ends } = Seasons.nthToDateRange(season);
+	const startsTs = dateToDatabaseTimestamp(starts);
+	const endsTs = dateToDatabaseTimestamp(ends);
+
+	const sendouqWeapons = db
+		.selectFrom("ReportedWeapon")
+		.innerJoin("GroupMatch", "ReportedWeapon.groupMatchId", "GroupMatch.id")
+		.select(({ fn }) => [
+			"ReportedWeapon.userId",
+			"ReportedWeapon.weaponSplId",
+			fn.countAll<number>().as("count"),
+		])
+		.where("GroupMatch.createdAt", ">=", startsTs)
+		.where("GroupMatch.createdAt", "<=", endsTs)
+		.groupBy(["ReportedWeapon.userId", "ReportedWeapon.weaponSplId"]);
+
+	const tournamentWeapons = db
+		.selectFrom("ReportedWeapon")
+		.innerJoin(
+			"TournamentMatch",
+			"TournamentMatch.id",
+			"ReportedWeapon.tournamentMatchId",
+		)
+		.innerJoin(
+			"TournamentStage",
+			"TournamentStage.id",
+			"TournamentMatch.stageId",
+		)
+		.innerJoin("Tournament", "Tournament.id", "TournamentStage.tournamentId")
+		.select(({ fn }) => [
+			"ReportedWeapon.userId",
+			"ReportedWeapon.weaponSplId",
+			fn.countAll<number>().as("count"),
+		])
+		.where("Tournament.isFinalized", "=", 1)
+		.where("ReportedWeapon.createdAt", ">=", startsTs)
+		.where("ReportedWeapon.createdAt", "<=", endsTs)
+		.groupBy(["ReportedWeapon.userId", "ReportedWeapon.weaponSplId"]);
+
+	const rows = await db
+		.with("q1", (db) =>
+			db
+				.selectFrom(sendouqWeapons.unionAll(tournamentWeapons).as("merged"))
+				.select(({ fn }) => [
+					"merged.userId",
+					"merged.weaponSplId",
+					fn.sum<number>("merged.count").as("count"),
+				])
+				.groupBy(["merged.userId", "merged.weaponSplId"]),
+		)
+		.selectFrom("q1")
+		.select(({ fn }) => [
+			"q1.userId",
+			"q1.weaponSplId",
+			fn.max("q1.count").as("count"),
+		])
+		.groupBy("q1.userId")
+		.execute();
+
+	return Object.fromEntries(
+		rows
+			.filter((r) => r.count > MATCHES_COUNT_NEEDED_FOR_LEADERBOARD)
+			.map((r) => [r.userId, r.weaponSplId]),
+	);
 }

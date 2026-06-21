@@ -1,11 +1,9 @@
-import { type ActionFunction, redirect } from "@remix-run/node";
-import { z } from "zod/v4";
+import { type ActionFunction, redirect } from "react-router";
+import { z } from "zod";
 import { BUILD_SORT_IDENTIFIERS } from "~/db/tables";
 import { requireUser } from "~/features/auth/core/user.server";
 import * as BuildRepository from "~/features/builds/BuildRepository.server";
-import { refreshBuildsCacheByWeaponSplIds } from "~/features/builds/core/cached-builds.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
-import { logger } from "~/utils/logger";
 import { errorToastIfFalsy, parseRequestPayload } from "~/utils/remix.server";
 import { assertUnreachable } from "~/utils/types";
 import { userBuildsPage } from "~/utils/urls";
@@ -20,7 +18,7 @@ import {
 } from "~/utils/zod";
 
 export const action: ActionFunction = async ({ request }) => {
-	const user = await requireUser(request);
+	const user = requireUser();
 	const data = await parseRequestPayload({
 		request,
 		schema: buildsActionSchema,
@@ -28,34 +26,16 @@ export const action: ActionFunction = async ({ request }) => {
 
 	switch (data._action) {
 		case "DELETE_BUILD": {
-			const usersBuilds = await BuildRepository.allByUserId({
-				userId: user.id,
-				showPrivate: true,
-			});
+			const ownerId = await BuildRepository.ownerIdById(data.buildToDeleteId);
 
-			const buildToDelete = usersBuilds.find(
-				(build) => build.id === data.buildToDeleteId,
-			);
-
-			errorToastIfFalsy(buildToDelete, "Build to delete not found");
+			errorToastIfFalsy(ownerId === user.id, "Build to delete not found");
 
 			await BuildRepository.deleteById(data.buildToDeleteId);
-
-			try {
-				refreshBuildsCacheByWeaponSplIds(
-					buildToDelete.weapons.map((weapon) => weapon.weaponSplId),
-				);
-			} catch (error) {
-				logger.warn("Error refreshing builds cache", error);
-			}
 
 			break;
 		}
 		case "UPDATE_SORTING": {
-			await UserRepository.updateBuildSorting({
-				userId: user.id,
-				buildSorting: data.buildSorting,
-			});
+			await UserRepository.updateOwnBuildSorting(data.buildSorting);
 
 			break;
 		}

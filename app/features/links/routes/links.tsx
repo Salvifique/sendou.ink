@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/node";
+import type { MetaFunction } from "react-router";
 import { DiscordIcon } from "~/components/icons/Discord";
 import { YouTubeIcon } from "~/components/icons/YouTube";
 import { Main } from "~/components/Main";
@@ -6,6 +6,7 @@ import { metaTags } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import { LINKS_PAGE, navIconUrl } from "~/utils/urls";
 import links from "../links.json";
+import styles from "./links.module.css";
 
 export const handle: SendouRouteHandle = {
 	breadcrumb: () => ({
@@ -46,10 +47,10 @@ export default function LinksPage() {
 									>
 										{link.title}
 										{isDiscord ? (
-											<DiscordIcon className="discord-icon" />
+											<DiscordIcon className={styles.discordIcon} />
 										) : null}
 										{isYoutube ? (
-											<YouTubeIcon className="youtube-icon" />
+											<YouTubeIcon className={styles.youtubeIcon} />
 										) : null}
 									</a>
 								</h2>

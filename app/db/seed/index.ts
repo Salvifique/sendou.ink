@@ -1,5 +1,6 @@
 import { faker } from "@faker-js/faker";
 import { add, sub } from "date-fns";
+import { nanoid } from "nanoid";
 import * as R from "remeda";
 import { db, sql } from "~/db/sql";
 import { ADMIN_DISCORD_ID, ADMIN_ID } from "~/features/admin/admin-constants";
@@ -8,9 +9,13 @@ import * as AssociationRepository from "~/features/associations/AssociationRepos
 import * as BuildRepository from "~/features/builds/BuildRepository.server";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
 import { tags } from "~/features/calendar/calendar-constants";
+import * as ChatSystemMessage from "~/features/chat/ChatSystemMessage.server";
 import * as LFGRepository from "~/features/lfg/LFGRepository.server";
 import { TIMEZONES } from "~/features/lfg/lfg-constants";
 import { MapPool } from "~/features/map-list-generator/core/map-pool";
+import { BANNED_MAPS } from "~/features/match-profile/banned-maps";
+import * as MatchProfileRepository from "~/features/match-profile/MatchProfileRepository.server";
+import { AMOUNT_OF_MAPS_IN_POOL_PER_MODE } from "~/features/match-profile/match-profile-constants";
 import * as NotificationRepository from "~/features/notifications/NotificationRepository.server";
 import type { Notification } from "~/features/notifications/notifications-types";
 import * as PlusSuggestionRepository from "~/features/plus-suggestions/PlusSuggestionRepository.server";
@@ -21,31 +26,14 @@ import {
 } from "~/features/plus-voting/core";
 import * as PlusVotingRepository from "~/features/plus-voting/PlusVotingRepository.server";
 import * as ScrimPostRepository from "~/features/scrims/ScrimPostRepository.server";
-import * as QRepository from "~/features/sendouq/QRepository.server";
-import { addMember } from "~/features/sendouq/queries/addMember.server";
-import { createMatch } from "~/features/sendouq/queries/createMatch.server";
-import { calculateMatchSkills } from "~/features/sendouq-match/core/skills.server";
-import {
-	summarizeMaps,
-	summarizePlayerResults,
-} from "~/features/sendouq-match/core/summarizer.server";
-import * as QMatchRepository from "~/features/sendouq-match/QMatchRepository.server";
-import { winnersArrayToWinner } from "~/features/sendouq-match/q-match-utils";
-import { addMapResults } from "~/features/sendouq-match/queries/addMapResults.server";
-import { addPlayerResults } from "~/features/sendouq-match/queries/addPlayerResults.server";
-import { addReportedWeapons } from "~/features/sendouq-match/queries/addReportedWeapons.server";
-import { addSkills } from "~/features/sendouq-match/queries/addSkills.server";
-import { findMatchById } from "~/features/sendouq-match/queries/findMatchById.server";
-import { reportScore } from "~/features/sendouq-match/queries/reportScore.server";
-import { setGroupAsInactive } from "~/features/sendouq-match/queries/setGroupAsInactive.server";
-import { BANNED_MAPS } from "~/features/sendouq-settings/banned-maps";
-import * as QSettingsRepository from "~/features/sendouq-settings/QSettingsRepository.server";
-import { AMOUNT_OF_MAPS_IN_POOL_PER_MODE } from "~/features/sendouq-settings/q-settings-constants";
-import { TOURNAMENT } from "~/features/tournament/tournament-constants";
+import * as SQGroupRepository from "~/features/sendouq/SQGroupRepository.server";
+import * as ReportedWeaponRepository from "~/features/sendouq-match/ReportedWeaponRepository.server";
+import * as SQMatchRepository from "~/features/sendouq-match/SQMatchRepository.server";
 import { clearAllTournamentDataCache } from "~/features/tournament-bracket/core/Tournament.server";
+import * as TournamentLFGRepository from "~/features/tournament-lfg/TournamentLFGRepository.server";
 import * as TournamentOrganizationRepository from "~/features/tournament-organization/TournamentOrganizationRepository.server";
 import * as UserRepository from "~/features/user-page/UserRepository.server";
-import { createVod } from "~/features/vods/queries/createVod.server";
+import * as VodRepository from "~/features/vods/VodRepository.server";
 import {
 	secondsToHoursMinutesSecondString,
 	youtubeIdToYoutubeUrl,
@@ -57,29 +45,97 @@ import {
 	shoesGearIds,
 } from "~/modules/in-game-lists/gear-ids";
 import { modesShort, rankedModesShort } from "~/modules/in-game-lists/modes";
-import { stageIds } from "~/modules/in-game-lists/stage-ids";
+import { stagesObj as s, stageIds } from "~/modules/in-game-lists/stage-ids";
 import type {
 	AbilityType,
 	MainWeaponId,
+	ModeShort,
 	StageId,
 } from "~/modules/in-game-lists/types";
-import { mainWeaponIds } from "~/modules/in-game-lists/weapon-ids";
-import type { TournamentMapListMap } from "~/modules/tournament-map-list-generator";
-import { SENDOUQ_DEFAULT_MAPS } from "~/modules/tournament-map-list-generator/constants";
+import {
+	canonicalWeaponSplId,
+	mainWeaponIds,
+} from "~/modules/in-game-lists/weapon-ids";
+import type { TournamentMapListMap } from "~/modules/tournament-map-list-generator/types";
 import { nullFilledArray } from "~/utils/arrays";
-import { databaseTimestampNow, dateToDatabaseTimestamp } from "~/utils/dates";
+import {
+	databaseTimestampNow,
+	databaseTimestampToDate,
+	dateToDatabaseTimestamp,
+} from "~/utils/dates";
 import { shortNanoid } from "~/utils/id";
 import invariant from "~/utils/invariant";
-import { mySlugify } from "~/utils/urls";
-import type { QWeaponPool, Tables, UserMapModePreferences } from "../tables";
+import { randomTeamName } from "~/utils/team-name";
+import { mySlugify, navIconUrl, sendouQMatchPage } from "~/utils/urls";
+import {
+	getArtFilename,
+	SEED_ART_URLS,
+	SEED_TEAM_IMAGES,
+	SEED_TOURNAMENT_IMAGES,
+} from "../../../scripts/seed-art-urls";
+import type { ParsedMemento, Tables, UserMapModePreferences } from "../tables";
 import {
 	ADMIN_TEST_AVATAR,
 	AMOUNT_OF_CALENDAR_EVENTS,
 	NZAP_TEST_AVATAR,
 	NZAP_TEST_DISCORD_ID,
 	NZAP_TEST_ID,
+	ORG_ADMIN_TEST_ID,
+	STAFF_TEST_DISCORD_ID,
+	STAFF_TEST_ID,
 } from "./constants";
 import placements from "./placements.json";
+
+const SENDOUQ_DEFAULT_MAPS: Record<
+	ModeShort,
+	[StageId, StageId, StageId, StageId, StageId, StageId, StageId]
+> = {
+	TW: [
+		s.EELTAIL_ALLEY,
+		s.HAGGLEFISH_MARKET,
+		s.UNDERTOW_SPILLWAY,
+		s.WAHOO_WORLD,
+		s.UM_AMI_RUINS,
+		s.HUMPBACK_PUMP_TRACK,
+		s.ROBO_ROM_EN,
+	],
+	SZ: [
+		s.HAGGLEFISH_MARKET,
+		s.MAHI_MAHI_RESORT,
+		s.INKBLOT_ART_ACADEMY,
+		s.MAKOMART,
+		s.HUMPBACK_PUMP_TRACK,
+		s.CRABLEG_CAPITAL,
+		s.ROBO_ROM_EN,
+	],
+	TC: [
+		s.ROBO_ROM_EN,
+		s.EELTAIL_ALLEY,
+		s.UNDERTOW_SPILLWAY,
+		s.MUSEUM_D_ALFONSINO,
+		s.MAKOMART,
+		s.MANTA_MARIA,
+		s.SHIPSHAPE_CARGO_CO,
+	],
+	RM: [
+		s.SCORCH_GORGE,
+		s.HAGGLEFISH_MARKET,
+		s.UNDERTOW_SPILLWAY,
+		s.MUSEUM_D_ALFONSINO,
+		s.FLOUNDER_HEIGHTS,
+		s.CRABLEG_CAPITAL,
+		s.MINCEMEAT_METALWORKS,
+	],
+	CB: [
+		s.SCORCH_GORGE,
+		s.INKBLOT_ART_ACADEMY,
+		s.BRINEWATER_SPRINGS,
+		s.MANTA_MARIA,
+		s.HUMPBACK_PUMP_TRACK,
+		s.UM_AMI_RUINS,
+		s.ROBO_ROM_EN,
+	],
+};
 
 const calendarEventWithToToolsRegOpen = () =>
 	calendarEventWithToTools("PICNIC", true);
@@ -115,11 +171,16 @@ const basicSeeds = (variation?: SeedVariation | null) => [
 	makeAdminTournamentOrganizer,
 	nzapUser,
 	users,
+	staffUser,
 	fixAdminId,
+	fixStaffUserId,
+	makeArtists,
 	adminUserWeaponPool,
+	adminUserWidgets,
 	userProfiles,
-	userMapModePreferences,
-	userQWeaponPool,
+	variation === "TEAM_MAP_PREFS" ? undefined : userMapModePreferences,
+	userMatchProfileWeaponPool,
+	seedingSkills,
 	lastMonthsVoting,
 	syncPlusTiers,
 	lastMonthSuggestions,
@@ -127,6 +188,7 @@ const basicSeeds = (variation?: SeedVariation | null) => [
 	badgesToUsers,
 	badgeManagers,
 	patrons,
+	insertTeamAndTournamentImages,
 	organization,
 	calendarEvents,
 	calendarEventBadges,
@@ -157,7 +219,7 @@ const basicSeeds = (variation?: SeedVariation | null) => [
 	calendarEventWithToToolsTeamsDepths,
 	calendarEventWithToToolsLUTI,
 	calendarEventWithToToolsTeamsLUTI,
-	tournamentSubs,
+	variation === "NO_TOURNAMENT_TEAMS" ? undefined : tournamentLfgGroups,
 	adminBuilds,
 	manySplattershotBuilds,
 	detailedTeam(variation),
@@ -168,13 +230,18 @@ const basicSeeds = (variation?: SeedVariation | null) => [
 	arts,
 	commissionsOpen,
 	playedMatches,
-	groups,
+	variation === "NO_SQ_GROUPS" ? undefined : () => groups(variation),
 	friendCodes,
 	lfgPosts,
-	scrimPosts,
-	scrimPostRequests,
+	variation === "NO_SCRIMS" ? undefined : scrimPosts,
+	variation === "NO_SCRIMS" ? undefined : scrimPostRequests,
 	associations,
 	notifications,
+	() => friendships(variation),
+	liveStreams,
+	splatoonRotations,
+	variation === "FINALIZED_BRACKET" ? finalizedBracket : undefined,
+	variation === "AB_RR" ? abDivisionsTournament : undefined,
 ];
 
 export async function seed(variation?: SeedVariation | null) {
@@ -191,6 +258,359 @@ export async function seed(variation?: SeedVariation | null) {
 	clearAllTournamentDataCache();
 }
 
+const FINALIZED_TOURNAMENT_ID = 7;
+const FINALIZED_EVENT_ID = 207;
+const FINALIZED_TEAM_ID_OFFSET = 600;
+
+function finalizedBracket() {
+	// Tournament
+	sql
+		.prepare(
+			`insert into "Tournament" ("id", "mapPickingStyle", "settings", "isFinalized")
+			 values ($id, $mapPickingStyle, $settings, 1)`,
+		)
+		.run({
+			id: FINALIZED_TOURNAMENT_ID,
+			mapPickingStyle: "AUTO_ALL",
+			settings: JSON.stringify({
+				bracketProgression: [
+					{
+						type: "single_elimination",
+						name: "Bracket",
+						requiresCheckIn: false,
+						settings: { thirdPlaceMatch: false },
+					},
+				],
+			}),
+		});
+
+	// CalendarEvent
+	sql
+		.prepare(
+			`insert into "CalendarEvent" ("id", "name", "description", "discordInviteCode", "bracketUrl", "authorId", "tournamentId")
+			 values ($id, $name, $description, $discordInviteCode, $bracketUrl, $authorId, $tournamentId)`,
+		)
+		.run({
+			id: FINALIZED_EVENT_ID,
+			name: "In The Zone 1",
+			description: "Finalized tournament for testing",
+			discordInviteCode: "test",
+			bracketUrl: "https://example.com",
+			authorId: ADMIN_ID,
+			tournamentId: FINALIZED_TOURNAMENT_ID,
+		});
+
+	// CalendarEventDate — recent start time (within 7-day spoiler window)
+	sql
+		.prepare(
+			`insert into "CalendarEventDate" ("eventId", "startTime")
+			 values ($eventId, $startTime)`,
+		)
+		.run({
+			eventId: FINALIZED_EVENT_ID,
+			startTime: dateToDatabaseTimestamp(
+				new Date(Date.now() - 1000 * 60 * 60 * 2),
+			),
+		});
+
+	// 8 teams with 4 members each
+	const userIds = userIdsInAscendingOrderById();
+	const teamNames = [
+		"Alpha",
+		"Bravo",
+		"Charlie",
+		"Delta",
+		"Echo",
+		"Foxtrot",
+		"Golf",
+		"Hotel",
+	];
+
+	for (let i = 0; i < 8; i++) {
+		const teamId = FINALIZED_TEAM_ID_OFFSET + i + 1;
+
+		sql
+			.prepare(
+				`insert into "TournamentTeam" ("id", "name", "createdAt", "tournamentId", "inviteCode", "seed")
+				 values ($id, $name, $createdAt, $tournamentId, $inviteCode, $seed)`,
+			)
+			.run({
+				id: teamId,
+				name: teamNames[i],
+				createdAt: dateToDatabaseTimestamp(new Date()),
+				tournamentId: FINALIZED_TOURNAMENT_ID,
+				inviteCode: shortNanoid(),
+				seed: i + 1,
+			});
+
+		sql
+			.prepare(
+				`insert into "TournamentTeamCheckIn" ("tournamentTeamId", "checkedInAt")
+				 values ($tournamentTeamId, $checkedInAt)`,
+			)
+			.run({
+				tournamentTeamId: teamId,
+				checkedInAt: dateToDatabaseTimestamp(new Date()),
+			});
+
+		for (let j = 0; j < 4; j++) {
+			sql
+				.prepare(
+					`insert into "TournamentTeamMember" ("tournamentTeamId", "userId", "createdAt", "role")
+					 values ($tournamentTeamId, $userId, $createdAt, $role)`,
+				)
+				.run({
+					tournamentTeamId: teamId,
+					userId: userIds.shift()!,
+					createdAt: dateToDatabaseTimestamp(new Date()),
+					role: j === 0 ? "OWNER" : "REGULAR",
+				});
+		}
+	}
+
+	// Bracket structure
+	const stageId = (
+		sql
+			.prepare(
+				`insert into "TournamentStage" ("tournamentId", "name", "number", "type", "settings")
+				 values ($tournamentId, $name, $number, $type, $settings) returning id`,
+			)
+			.get({
+				tournamentId: FINALIZED_TOURNAMENT_ID,
+				name: "Bracket",
+				number: 1,
+				type: "single_elimination",
+				settings: JSON.stringify({ thirdPlaceMatch: false }),
+			}) as { id: number }
+	).id;
+
+	const groupId = (
+		sql
+			.prepare(
+				`insert into "TournamentGroup" ("stageId", "number")
+				 values ($stageId, $number) returning id`,
+			)
+			.get({ stageId, number: 1 }) as { id: number }
+	).id;
+
+	const roundMaps = JSON.stringify({ count: 3, type: "BEST_OF" });
+
+	const roundIds: number[] = [];
+	for (let r = 1; r <= 3; r++) {
+		const roundId = (
+			sql
+				.prepare(
+					`insert into "TournamentRound" ("stageId", "groupId", "number", "maps")
+					 values ($stageId, $groupId, $number, $maps) returning id`,
+				)
+				.get({ stageId, groupId, number: r, maps: roundMaps }) as { id: number }
+		).id;
+		roundIds.push(roundId);
+	}
+
+	const t = (seed: number) => FINALIZED_TEAM_ID_OFFSET + seed;
+
+	// SE 8-team bracket: standard seeding
+	// QF: 1v8, 4v5, 2v7, 3v6
+	// SF: winner(1v8) vs winner(4v5), winner(2v7) vs winner(3v6)
+	// F:  winner of SF1 vs winner of SF2
+	const matches = [
+		// QF (round 1)
+		{ round: 0, number: 1, team1: t(1), team2: t(8), winner: t(1) },
+		{ round: 0, number: 2, team1: t(4), team2: t(5), winner: t(4) },
+		{ round: 0, number: 3, team1: t(2), team2: t(7), winner: t(2) },
+		{ round: 0, number: 4, team1: t(3), team2: t(6), winner: t(3) },
+		// SF (round 2)
+		{ round: 1, number: 1, team1: t(1), team2: t(4), winner: t(1) },
+		{ round: 1, number: 2, team1: t(2), team2: t(3), winner: t(2) },
+		// Finals (round 3)
+		{ round: 2, number: 1, team1: t(1), team2: t(2), winner: t(1) },
+	];
+
+	const matchInsertStm = sql.prepare(
+		`insert into "TournamentMatch" ("stageId", "groupId", "roundId", "number", "status", "opponentOne", "opponentTwo")
+		 values ($stageId, $groupId, $roundId, $number, $status, $opponentOne, $opponentTwo) returning id`,
+	);
+
+	const gameResultInsertStm = sql.prepare(
+		`insert into "TournamentMatchGameResult" ("matchId", "mode", "number", "reporterId", "source", "stageId", "winnerTeamId")
+		 values ($matchId, $mode, $number, $reporterId, $source, $stageId, $winnerTeamId)`,
+	);
+
+	for (const m of matches) {
+		const matchId = (
+			matchInsertStm.get({
+				stageId,
+				groupId,
+				roundId: roundIds[m.round],
+				number: m.number,
+				status: 4,
+				opponentOne: JSON.stringify({
+					id: m.team1,
+					score: m.winner === m.team1 ? 2 : 0,
+					result: m.winner === m.team1 ? "win" : "loss",
+				}),
+				opponentTwo: JSON.stringify({
+					id: m.team2,
+					score: m.winner === m.team2 ? 2 : 0,
+					result: m.winner === m.team2 ? "win" : "loss",
+				}),
+			}) as { id: number }
+		).id;
+
+		// 2 game results (2-0 sweep)
+		for (let g = 1; g <= 2; g++) {
+			gameResultInsertStm.run({
+				matchId,
+				mode: "SZ",
+				number: g,
+				reporterId: ADMIN_ID,
+				source: "DEFAULT",
+				stageId: 1,
+				winnerTeamId: m.winner,
+			});
+		}
+	}
+
+	// TournamentResult — placements for all 8 teams
+	const placements = [
+		{ teamSeed: 1, placement: 1, setResults: ["W", "W", "W"] },
+		{ teamSeed: 2, placement: 2, setResults: ["W", "W", "L"] },
+		{ teamSeed: 3, placement: 3, setResults: ["W", "L"] },
+		{ teamSeed: 4, placement: 3, setResults: ["W", "L"] },
+		{ teamSeed: 5, placement: 5, setResults: ["L"] },
+		{ teamSeed: 6, placement: 5, setResults: ["L"] },
+		{ teamSeed: 7, placement: 5, setResults: ["L"] },
+		{ teamSeed: 8, placement: 5, setResults: ["L"] },
+	];
+
+	const resultInsertStm = sql.prepare(
+		`insert into "TournamentResult" ("tournamentId", "tournamentTeamId", "userId", "placement", "participantCount", "setResults")
+		 values ($tournamentId, $tournamentTeamId, $userId, $placement, $participantCount, $setResults)`,
+	);
+
+	// Insert one result row per team member
+	for (const p of placements) {
+		const teamId = t(p.teamSeed);
+		const members = sql
+			.prepare(
+				`select "userId" from "TournamentTeamMember" where "tournamentTeamId" = ?`,
+			)
+			.all(teamId) as Array<{ userId: number }>;
+
+		for (const member of members) {
+			resultInsertStm.run({
+				tournamentId: FINALIZED_TOURNAMENT_ID,
+				tournamentTeamId: teamId,
+				userId: member.userId,
+				placement: p.placement,
+				participantCount: 8,
+				setResults: JSON.stringify(p.setResults),
+			});
+		}
+	}
+}
+
+const AB_RR_TOURNAMENT_ID = 8;
+const AB_RR_EVENT_ID = 208;
+const AB_RR_TEAM_ID_OFFSET = 700;
+const AB_RR_TEAM_COUNT = 12;
+
+function abDivisionsTournament() {
+	sql
+		.prepare(
+			`insert into "Tournament" ("id", "mapPickingStyle", "settings")
+			 values ($id, $mapPickingStyle, $settings)`,
+		)
+		.run({
+			id: AB_RR_TOURNAMENT_ID,
+			mapPickingStyle: "AUTO_ALL",
+			settings: JSON.stringify({
+				bracketProgression: [
+					{
+						type: "round_robin",
+						name: "Groups stage",
+						requiresCheckIn: false,
+						settings: {
+							hasAbDivisions: true,
+							teamsPerGroup: AB_RR_TEAM_COUNT,
+						},
+					},
+				],
+			}),
+		});
+
+	sql
+		.prepare(
+			`insert into "CalendarEvent" ("id", "name", "description", "discordInviteCode", "bracketUrl", "authorId", "tournamentId")
+			 values ($id, $name, $description, $discordInviteCode, $bracketUrl, $authorId, $tournamentId)`,
+		)
+		.run({
+			id: AB_RR_EVENT_ID,
+			name: "A/B Divisions Cup",
+			description: "Bipartite round robin tournament for testing",
+			discordInviteCode: "abrr",
+			bracketUrl: "https://example.com",
+			authorId: ADMIN_ID,
+			tournamentId: AB_RR_TOURNAMENT_ID,
+		});
+
+	sql
+		.prepare(
+			`insert into "CalendarEventDate" ("eventId", "startTime")
+			 values ($eventId, $startTime)`,
+		)
+		.run({
+			eventId: AB_RR_EVENT_ID,
+			startTime: dateToDatabaseTimestamp(new Date(Date.now() - 1000 * 60 * 30)),
+		});
+
+	const userIds = userIdsInAscendingOrderById();
+	const now = dateToDatabaseTimestamp(new Date());
+
+	for (let i = 0; i < AB_RR_TEAM_COUNT; i++) {
+		const teamId = AB_RR_TEAM_ID_OFFSET + i + 1;
+
+		sql
+			.prepare(
+				`insert into "TournamentTeam" ("id", "name", "createdAt", "tournamentId", "inviteCode", "seed")
+				 values ($id, $name, $createdAt, $tournamentId, $inviteCode, $seed)`,
+			)
+			.run({
+				id: teamId,
+				name: `AB Team ${i + 1}`,
+				createdAt: now,
+				tournamentId: AB_RR_TOURNAMENT_ID,
+				inviteCode: shortNanoid(),
+				seed: i + 1,
+			});
+
+		sql
+			.prepare(
+				`insert into "TournamentTeamCheckIn" ("tournamentTeamId", "checkedInAt")
+				 values ($tournamentTeamId, $checkedInAt)`,
+			)
+			.run({
+				tournamentTeamId: teamId,
+				checkedInAt: now,
+			});
+
+		for (let j = 0; j < 4; j++) {
+			sql
+				.prepare(
+					`insert into "TournamentTeamMember" ("tournamentTeamId", "userId", "createdAt", "role")
+					 values ($tournamentTeamId, $userId, $createdAt, $role)`,
+				)
+				.run({
+					tournamentTeamId: teamId,
+					userId: userIds.shift()!,
+					createdAt: now,
+					role: j === 0 ? "OWNER" : "REGULAR",
+				});
+		}
+	}
+}
+
 function wipeDB() {
 	const tablesToDelete = [
 		"ScrimPost",
@@ -202,6 +622,8 @@ function wipeDB() {
 		"GroupMatchMap",
 		"GroupMatch",
 		"Group",
+		"TaggedArt",
+		"ArtTag",
 		"ArtUserMetadata",
 		"Art",
 		"UnvalidatedUserSubmittedImage",
@@ -212,6 +634,7 @@ function wipeDB() {
 		"MapPoolMap",
 		"TournamentMatchGameResult",
 		"TournamentTeamCheckIn",
+		"TournamentLFGLike",
 		"TournamentTeam",
 		"TournamentStage",
 		"TournamentResult",
@@ -229,12 +652,19 @@ function wipeDB() {
 		"UserFriendCode",
 		"NotificationUser",
 		"Notification",
+		"BanLog",
+		"ModNote",
+		"Friendship",
+		"FriendRequest",
 		"User",
 		"PlusSuggestion",
 		"PlusVote",
 		"TournamentBadgeOwner",
 		"BadgeManager",
 		"TournamentOrganization",
+		"SeedingSkill",
+		"LiveStream",
+		"SplatoonRotation",
 	];
 
 	for (const table of tablesToDelete) {
@@ -283,6 +713,14 @@ function makeAdminTournamentOrganizer() {
 		.run();
 }
 
+function makeArtists() {
+	sql
+		.prepare(
+			`update "User" set "isArtist" = 1 where id in (${ADMIN_ID}, ${NZAP_TEST_ID})`,
+		)
+		.run();
+}
+
 function adminUserWeaponPool() {
 	for (const [i, weaponSplId] of [200, 1100, 2000, 4000].entries()) {
 		sql
@@ -296,6 +734,30 @@ function adminUserWeaponPool() {
 	}
 }
 
+async function adminUserWidgets() {
+	await UserRepository.upsertWidgets(ADMIN_ID, [
+		{
+			id: "bio",
+			settings: { bio: "" },
+		},
+		{
+			id: "badges-owned",
+		},
+		{
+			id: "teams",
+		},
+		{
+			id: "organizations",
+		},
+		{
+			id: "peak-sp",
+		},
+		{
+			id: "peak-xp",
+		},
+	]);
+}
+
 function nzapUser() {
 	return UserRepository.upsert({
 		discordId: NZAP_TEST_DISCORD_ID,
@@ -305,6 +767,26 @@ function nzapUser() {
 		discordAvatar: NZAP_TEST_AVATAR,
 		discordUniqueName: null,
 	});
+}
+
+function staffUser() {
+	return UserRepository.upsert({
+		discordId: STAFF_TEST_DISCORD_ID,
+		discordName: "Panda",
+		twitch: null,
+		youtubeId: null,
+		discordAvatar: null,
+		discordUniqueName: null,
+	});
+}
+
+function fixStaffUserId() {
+	sql.prepare(`delete from user where id = ${STAFF_TEST_ID}`).run();
+	sql
+		.prepare(
+			`update "User" set "id" = ${STAFF_TEST_ID} where "discordId" = '${STAFF_TEST_DISCORD_ID}'`,
+		)
+		.run();
 }
 
 async function users() {
@@ -406,7 +888,7 @@ async function userProfiles() {
 		if (faker.number.float(1) > 0.9) defaultLanguages.push("it");
 		if (faker.number.float(1) > 0.9) defaultLanguages.push("ja");
 
-		await QSettingsRepository.updateVoiceChat({
+		await MatchProfileRepository.updateVoiceChat({
 			languages: defaultLanguages,
 			userId: id,
 			vc:
@@ -460,25 +942,59 @@ async function userMapModePreferences() {
 	}
 }
 
-async function userQWeaponPool() {
-	for (let id = 1; id < 500; id++) {
-		if (id === 2) continue; // no weapons for N-ZAP
+async function userMatchProfileWeaponPool() {
+	const users = sql.prepare('SELECT id FROM "User" LIMIT 500').all() as {
+		id: number;
+	}[];
+
+	for (const { id } of users) {
+		if (id === NZAP_TEST_ID) continue; // no weapons for N-ZAP
 		if (faker.number.float(1) < 0.2) continue; // 80% have weapons
 
 		const weapons = faker.helpers
 			.shuffle(mainWeaponIds)
 			.slice(0, faker.helpers.arrayElement([1, 2, 3, 4]));
 
-		const weaponPool: Array<QWeaponPool> = weapons.map((weaponSplId) => ({
+		const weaponPool = weapons.map((weaponSplId, i) => ({
+			userId: id,
+			sortOrder: i,
 			weaponSplId,
 			isFavorite: faker.number.float(1) > 0.7 ? 1 : 0,
 		}));
 
-		await db
-			.updateTable("User")
-			.set({ qWeaponPool: JSON.stringify(weaponPool) })
-			.where("User.id", "=", id)
-			.execute();
+		await db.insertInto("UserWeaponPool").values(weaponPool).execute();
+	}
+}
+
+function seedingSkills() {
+	const users = sql.prepare('SELECT id FROM "User" LIMIT 500').all() as {
+		id: number;
+	}[];
+
+	for (const { id: userId } of users) {
+		if (faker.number.float() < 0.7) {
+			const mu = faker.number.float({ min: 22, max: 45 });
+			const sigma = faker.number.float({ min: 4, max: 8 });
+			const ordinal = mu - 3 * sigma;
+
+			sql
+				.prepare(
+					`INSERT INTO "SeedingSkill" ("userId", "type", "mu", "sigma", "ordinal") VALUES (?, 'RANKED', ?, ?, ?)`,
+				)
+				.run(userId, mu, sigma, ordinal);
+		}
+
+		if (faker.number.float() < 0.5) {
+			const mu = faker.number.float({ min: 22, max: 42 });
+			const sigma = faker.number.float({ min: 4, max: 8 });
+			const ordinal = mu - 3 * sigma;
+
+			sql
+				.prepare(
+					`INSERT INTO "SeedingSkill" ("userId", "type", "mu", "sigma", "ordinal") VALUES (?, 'UNRANKED', ?, ?, ?)`,
+				)
+				.run(userId, mu, sigma, ordinal);
+		}
 	}
 }
 
@@ -600,14 +1116,15 @@ async function thisMonthsSuggestions() {
 	}
 }
 
-function syncPlusTiers() {
-	sql
-		.prepare(
-			/* sql */ `
-    insert into "PlusTier" ("userId", "tier") select "userId", "tier" from "FreshPlusTier" where "tier" is not null;
-  `,
-		)
-		.run();
+async function syncPlusTiers() {
+	const tiers = await PlusVotingRepository.allPlusTiersFromLatestVoting();
+
+	if (tiers.length === 0) return;
+
+	await db
+		.insertInto("PlusTier")
+		.values(tiers.map(({ userId, plusTier }) => ({ userId, tier: plusTier })))
+		.execute();
 }
 
 function getAvailableBadgeIds() {
@@ -677,7 +1194,10 @@ function patrons() {
 			.all() as any[]
 	)
 		.map((u) => u.id)
-		.filter((id) => id !== NZAP_TEST_ID && id !== ADMIN_ID) as number[];
+		.filter(
+			(id) =>
+				id !== NZAP_TEST_ID && id !== ADMIN_ID && id !== ORG_ADMIN_TEST_ID,
+		) as number[];
 
 	const givePatronStm = sql.prepare(
 		`update user set "patronTier" = $patronTier, "patronSince" = $patronSince where id = $id`,
@@ -695,6 +1215,12 @@ function patrons() {
 		patronSince: dateToDatabaseTimestamp(faker.date.past()),
 		patronTier: 2,
 	});
+
+	// Give ORG_ADMIN_TEST_ID API access without patron status
+	// so they don't get TOURNAMENT_ADDER role
+	sql
+		.prepare(`update user set "isApiAccesser" = 1 where id = ?`)
+		.run(ORG_ADMIN_TEST_ID);
 }
 
 function userIdsInRandomOrder(specialLast = false) {
@@ -749,9 +1275,7 @@ function calendarEvents() {
 			)
 			.run({
 				id,
-				name: `${R.capitalize(faker.word.adjective())} ${R.capitalize(
-					faker.word.noun(),
-				)}`,
+				name: randomTeamName(),
 				description: faker.lorem.paragraph(),
 				discordInviteCode: faker.lorem.word(),
 				bracketUrl: faker.internet.url(),
@@ -816,6 +1340,12 @@ function calendarEvents() {
 	}
 }
 
+const addCalendarEventBadgeStm = sql.prepare(
+	/*sql */ `insert into "CalendarEventBadge" 
+          ("eventId", "badgeId") 
+          values ($eventId, $badgeId)`,
+);
+
 function calendarEventBadges() {
 	for (let eventId = 1; eventId <= AMOUNT_OF_CALENDAR_EVENTS; eventId++) {
 		if (faker.number.float(1) > 0.25) continue;
@@ -827,13 +1357,10 @@ function calendarEventBadges() {
 			i < faker.helpers.arrayElement([1, 1, 1, 1, 2, 2, 3]);
 			i++
 		) {
-			sql
-				.prepare(
-					`insert into "CalendarEventBadge" 
-          ("eventId", "badgeId") 
-          values ($eventId, $badgeId)`,
-				)
-				.run({ eventId, badgeId: availableBadgeIds.pop() });
+			addCalendarEventBadgeStm.run({
+				eventId,
+				badgeId: availableBadgeIds.pop(),
+			});
 		}
 	}
 }
@@ -864,7 +1391,7 @@ async function calendarEventResults() {
 				.fill(null)
 				.map((_, i) => ({
 					placement: i + 1,
-					teamName: R.capitalize(faker.word.noun()),
+					teamName: randomTeamName(),
 					players: new Array(
 						faker.helpers.arrayElement([1, 2, 3, 4, 4, 4, 4, 4, 5, 6]),
 					)
@@ -912,6 +1439,14 @@ function calendarEventWithToTools(
 		SOS: "Swim or Sink 101",
 		DEPTHS: "The Depths 5",
 		LUTI: "Leagues Under The Ink Season 15",
+	}[event];
+	const badges = {
+		PICNIC: [1, 2],
+		ITZ: [3, 4],
+		PP: [5, 6],
+		SOS: [7, 8],
+		DEPTHS: [9, 10],
+		LUTI: [],
 	}[event];
 
 	const settings: Tables["Tournament"]["settings"] =
@@ -1093,7 +1628,8 @@ function calendarEventWithToTools(
         "bracketUrl",
         "authorId",
         "tournamentId",
-				"organizationId"
+				"organizationId",
+				"avatarImgId"
       ) values (
         $id,
         $name,
@@ -1102,7 +1638,8 @@ function calendarEventWithToTools(
         $bracketUrl,
         $authorId,
         $tournamentId,
-				$organizationId
+				$organizationId,
+				$avatarImgId
       )
       `,
 		)
@@ -1115,6 +1652,7 @@ function calendarEventWithToTools(
 			authorId: ADMIN_ID,
 			tournamentId,
 			organizationId: event === "PICNIC" ? 1 : null,
+			avatarImgId: getTournamentImageId(tournamentId),
 		});
 
 	const halfAnHourFromNow = new Date(Date.now() + 1000 * 60 * 30);
@@ -1139,6 +1677,13 @@ function calendarEventWithToTools(
 					: new Date(Date.now() - 1000 * 60 * 60),
 			),
 		});
+
+	for (const badgeId of badges) {
+		addCalendarEventBadgeStm.run({
+			eventId,
+			badgeId,
+		});
+	}
 }
 
 const tiebreakerPicks = new MapPool([
@@ -1208,12 +1753,7 @@ function calendarEventWithToToolsToSetMapPool() {
 	}
 }
 
-const validTournamentTeamName = () => {
-	while (true) {
-		const name = faker.music.songName();
-		if (name.length <= TOURNAMENT.TEAM_NAME_MAX_LENGTH) return name;
-	}
-};
+const validTournamentTeamName = () => randomTeamName();
 
 const availableStages: StageId[] = [1, 2, 3, 4, 6, 7, 8, 10, 11];
 const availablePairs = rankedModesShort
@@ -1262,13 +1802,15 @@ function calendarEventWithToToolsTeams(
         "name",
         "createdAt",
         "tournamentId",
-        "inviteCode"
+        "inviteCode",
+        "seed"
       ) values (
         $id,
         $name,
         $createdAt,
         $tournamentId,
-        $inviteCode
+        $inviteCode,
+        $seed
       )
       `,
 			)
@@ -1278,6 +1820,7 @@ function calendarEventWithToToolsTeams(
 				createdAt: dateToDatabaseTimestamp(new Date()),
 				tournamentId,
 				inviteCode: shortNanoid(),
+				seed: id,
 			});
 
 		// in PICNIC & PP Chimera is not checked in + in LUTI no check-ins at all
@@ -1318,21 +1861,21 @@ function calendarEventWithToToolsTeams(
       insert into "TournamentTeamMember" (
         "tournamentTeamId",
         "userId",
-        "isOwner",
-        "createdAt"
+        "createdAt",
+        "role"
       ) values (
         $tournamentTeamId,
         $userId,
-        $isOwner,
-        $createdAt
+        $createdAt,
+        $role
       )
       `,
 				)
 				.run({
 					tournamentTeamId: id + teamIdAddition,
 					userId,
-					isOwner: i === 0 ? 1 : 0,
 					createdAt: dateToDatabaseTimestamp(yesterday),
+					role: i === 0 ? "OWNER" : "REGULAR",
 				});
 		}
 
@@ -1395,71 +1938,113 @@ function calendarEventWithToToolsTeams(
 	}
 }
 
-function tournamentSubs() {
-	for (let id = 100; id < 120; id++) {
-		const includedWeaponIds: MainWeaponId[] = [];
+async function tournamentLfgGroups() {
+	const availableUsers = userIdsInAscendingOrderById().slice(300);
 
-		sql
-			.prepare(
-				/* sql */ `
-      insert into "TournamentSub" (
-        "userId",
-        "tournamentId",
-        "canVc",
-        "bestWeapons",
-        "okWeapons",
-        "message",
-        "visibility"
-      ) values (
-        @userId,
-        @tournamentId,
-        @canVc,
-        @bestWeapons,
-        @okWeapons,
-        @message,
-        @visibility
-      )
-    `,
-			)
-			.run({
-				userId: id,
-				tournamentId: 1,
-				canVc: Number(faker.number.float(1) > 0.5),
-				bestWeapons: nullFilledArray(
-					faker.helpers.arrayElement([1, 1, 1, 2, 2, 3, 4, 5]),
-				)
-					.map(() => {
-						while (true) {
-							const weaponId = R.sample(mainWeaponIds, 1)[0]!;
-							if (!includedWeaponIds.includes(weaponId)) {
-								includedWeaponIds.push(weaponId);
-								return weaponId;
-							}
-						}
-					})
-					.join(","),
-				okWeapons:
-					faker.number.float(1) > 0.5
-						? null
-						: nullFilledArray(
-								faker.helpers.arrayElement([1, 1, 1, 2, 2, 3, 4, 5]),
-							)
-								.map(() => {
-									while (true) {
-										const weaponId = R.sample(mainWeaponIds, 1)[0]!;
-										if (!includedWeaponIds.includes(weaponId)) {
-											includedWeaponIds.push(weaponId);
-											return weaponId;
-										}
-									}
-								})
-								.join(","),
-				message: faker.number.float(1) > 0.5 ? null : faker.lorem.paragraph(),
-				visibility: id < 105 ? "+1" : id < 110 ? "+2" : id < 115 ? "+2" : "ALL",
-			});
+	const MAX_GROUP_SIZE = 6;
+
+	// Add admin's friends to tournament LFG so sidebar shows tournament friends
+	for (const friendId of SENDOU_FRIEND_IDS_IN_TOURNAMENT_LFG) {
+		await TournamentLFGRepository.createPlaceholderTeam({
+			tournamentId: 1,
+			userId: friendId,
+		});
 	}
 
-	return null;
+	const tournaments = [1, 2, 3];
+
+	let userIndex = 0;
+	for (const tournamentId of tournaments) {
+		const users = availableUsers.slice(userIndex, userIndex + 8);
+		userIndex += 8;
+
+		// Group 1: solo placeholder, has note, isStayAsSub=1
+		const { id: team1Id } = await TournamentLFGRepository.createPlaceholderTeam(
+			{
+				tournamentId,
+				userId: users[0],
+				isStayAsSub: true,
+			},
+		);
+		await TournamentLFGRepository.updateTeamNote({
+			teamId: team1Id,
+			value: "Looking for a team, can play any role",
+		});
+
+		// Group 2: solo placeholder
+		const { id: team2Id } = await TournamentLFGRepository.createPlaceholderTeam(
+			{
+				tournamentId,
+				userId: users[1],
+			},
+		);
+
+		// Group 3: solo placeholder
+		const { id: team3Id } = await TournamentLFGRepository.createPlaceholderTeam(
+			{
+				tournamentId,
+				userId: users[2],
+			},
+		);
+
+		// Group 4: solo placeholder
+		const { id: team4Id } = await TournamentLFGRepository.createPlaceholderTeam(
+			{
+				tournamentId,
+				userId: users[3],
+			},
+		);
+
+		// Group 5: 2-member group (merged from two placeholders)
+		const { id: mergeTarget1 } =
+			await TournamentLFGRepository.createPlaceholderTeam({
+				tournamentId,
+				userId: users[4],
+			});
+		const { id: mergeSource1 } =
+			await TournamentLFGRepository.createPlaceholderTeam({
+				tournamentId,
+				userId: users[5],
+			});
+		await TournamentLFGRepository.mergeTeams({
+			survivingTeamId: mergeTarget1,
+			otherTeamId: mergeSource1,
+			maxGroupSize: MAX_GROUP_SIZE,
+		});
+
+		// Group 6: 2-member group (merged from two placeholders)
+		const { id: mergeTarget2 } =
+			await TournamentLFGRepository.createPlaceholderTeam({
+				tournamentId,
+				userId: users[6],
+			});
+		const { id: mergeSource2 } =
+			await TournamentLFGRepository.createPlaceholderTeam({
+				tournamentId,
+				userId: users[7],
+			});
+		await TournamentLFGRepository.mergeTeams({
+			survivingTeamId: mergeTarget2,
+			otherTeamId: mergeSource2,
+			maxGroupSize: MAX_GROUP_SIZE,
+		});
+
+		// Team 1 -> Team 2 (one-way like)
+		await TournamentLFGRepository.addLike({
+			likerTeamId: team1Id,
+			targetTeamId: team2Id,
+		});
+		// Team 2 -> Team 1 (mutual — tests invitation UI)
+		await TournamentLFGRepository.addLike({
+			likerTeamId: team2Id,
+			targetTeamId: team1Id,
+		});
+		// Team 3 -> Team 4 (one-way like)
+		await TournamentLFGRepository.addLike({
+			likerTeamId: team3Id,
+			targetTeamId: team4Id,
+		});
+	}
 }
 
 const randomAbility = (legalTypes: AbilityType[]) => {
@@ -1468,7 +2053,12 @@ const randomAbility = (legalTypes: AbilityType[]) => {
 	return randomOrderAbilities.find((a) => legalTypes.includes(a.type))!.name;
 };
 
-const adminWeaponPool = mainWeaponIds.filter(() => faker.number.float(1) > 0.8);
+const canonicalMainWeaponIds = mainWeaponIds.filter(
+	(id) => canonicalWeaponSplId(id) === id,
+);
+const adminWeaponPool = canonicalMainWeaponIds.filter(
+	() => faker.number.float(1) > 0.8,
+);
 async function adminBuilds() {
 	for (let i = 0; i < 50; i++) {
 		const randomOrderHeadGear = faker.helpers.shuffle(headGearIds.slice());
@@ -1543,7 +2133,7 @@ async function manySplattershotBuilds() {
 		);
 		const randomOrderShoesGear = faker.helpers.shuffle(shoesGearIds.slice());
 		const randomOrderWeaponIds = faker.helpers
-			.shuffle(mainWeaponIds.slice())
+			.shuffle(canonicalMainWeaponIds.slice())
 			.filter((id) => id !== SPLATTERSHOT_ID);
 
 		const ownerId = users.pop()!;
@@ -1598,25 +2188,13 @@ const detailedTeam = (seedVariation?: SeedVariation | null) => () => {
 	sql
 		.prepare(
 			/* sql */ `
-    insert into "UnvalidatedUserSubmittedImage" ("validatedAt", "url", "submitterUserId")
-      values 
-        (1672587342, 'AiGSM5T-cxm6BFGT7N_lA-1673297699133.webp', ${ADMIN_ID}), 
-        (1672587342, 'jTbWd95klxU2MzGFIdi1c-1673297932788.webp', ${ADMIN_ID})
-  `,
-		)
-		.run();
-
-	sql
-		.prepare(
-			/* sql */ `
-      insert into "AllTeam" ("name", "customUrl", "inviteCode", "bio", "avatarImgId", "bannerImgId")
+      insert into "AllTeam" ("name", "customUrl", "inviteCode", "bio", "avatarImgId")
        values (
           'Alliance Rogue',
           'alliance-rogue',
           '${shortNanoid()}',
           '${faker.lorem.paragraph()}',
-          1,
-          2
+          ${getTeamImageId(1)}
        )
   `,
 		)
@@ -1634,18 +2212,33 @@ const detailedTeam = (seedVariation?: SeedVariation | null) => () => {
 		sql
 			.prepare(
 				/*sql*/ `
-      insert into "AllTeamMember" ("teamId", "userId", "role", "isOwner", "leftAt")
+      insert into "AllTeamMember" ("teamId", "userId", "role", "isOwner", "leftAt", "order")
         values (
           1,
           ${userId},
           ${i === 0 ? "'CAPTAIN'" : "'FRONTLINE'"},
           ${i === 0 ? 1 : 0},
-          ${i < 4 ? "null" : "1672587342"}
+          ${i < 4 ? "null" : "1672587342"},
+          ${i}
         )
     `,
 			)
 			.run();
 	}
+
+	const teamPreferences: UserMapModePreferences = {
+		modes: modesShort.map((mode) => ({ mode, preference: "PREFER" as const })),
+		pool: modesShort.map((mode) => ({
+			mode,
+			stages: [...SENDOUQ_DEFAULT_MAPS[mode]],
+		})),
+	};
+
+	sql
+		.prepare(
+			/*sql*/ `update "AllTeam" set "mapModePreferences" = ? where "id" = 1`,
+		)
+		.run(JSON.stringify(teamPreferences));
 };
 
 function otherTeams() {
@@ -1665,12 +2258,7 @@ function otherTeams() {
 	);
 
 	for (let i = 3; i < 50; i++) {
-		const teamName =
-			i === 3
-				? "Team Olive"
-				: `${R.capitalize(faker.word.adjective())} ${R.capitalize(
-						faker.word.noun(),
-					)}`;
+		const teamName = i === 3 ? "Team Olive" : randomTeamName();
 		const teamCustomUrl = mySlugify(teamName);
 
 		sql
@@ -1703,12 +2291,13 @@ function otherTeams() {
 			sql
 				.prepare(
 					/*sql*/ `
-        insert into "AllTeamMember" ("teamId", "userId", "role", "isOwner")
+        insert into "AllTeamMember" ("teamId", "userId", "role", "isOwner", "order")
           values (
             ${i},
             ${userId},
             ${j === 0 ? "'CAPTAIN'" : "'FRONTLINE'"},
-            ${j === 0 ? 1 : 0}
+            ${j === 0 ? 1 : 0},
+            ${j}
           )
       `,
 				)
@@ -1717,62 +2306,64 @@ function otherTeams() {
 	}
 }
 
-function realVideo() {
-	createVod({
-		type: "TOURNAMENT",
-		youtubeUrl: youtubeIdToYoutubeUrl("M4aV-BQWlVg"),
-		date: { day: 2, month: 2, year: 2023 },
-		submitterUserId: ADMIN_ID,
-		title: "LUTI Division X Tournament - ABBF (THRONE) vs. Ascension",
-		pov: {
-			type: "USER",
-			userId: NZAP_TEST_ID,
-		},
-		isValidated: true,
-		matches: [
-			{
-				mode: "SZ",
-				stageId: 8,
-				startsAt: secondsToHoursMinutesSecondString(13),
-				weapons: [3040],
+async function realVideo() {
+	for (let i = 0; i < 5; i++) {
+		await VodRepository.insert({
+			type: "TOURNAMENT",
+			youtubeUrl: youtubeIdToYoutubeUrl("M4aV-BQWlVg"),
+			date: { day: 2, month: 2, year: 2023 },
+			submitterUserId: ADMIN_ID,
+			title: "LUTI Division X Tournament - ABBF (THRONE) vs. Ascension",
+			pov: {
+				type: "USER",
+				userId: faker.helpers.arrayElement(userIdsInRandomOrder()),
 			},
-			{
-				mode: "CB",
-				stageId: 6,
-				startsAt: secondsToHoursMinutesSecondString(307),
-				weapons: [3040],
-			},
-			{
-				mode: "TC",
-				stageId: 2,
-				startsAt: secondsToHoursMinutesSecondString(680),
-				weapons: [3040],
-			},
-			{
-				mode: "SZ",
-				stageId: 9,
-				startsAt: secondsToHoursMinutesSecondString(1186),
-				weapons: [3040],
-			},
-			{
-				mode: "RM",
-				stageId: 2,
-				startsAt: secondsToHoursMinutesSecondString(1386),
-				weapons: [3000],
-			},
-			{
-				mode: "TC",
-				stageId: 4,
-				startsAt: secondsToHoursMinutesSecondString(1586),
-				weapons: [1110],
-			},
-			// there are other matches too...
-		],
-	});
+			isValidated: true,
+			matches: [
+				{
+					mode: "SZ",
+					stageId: 8,
+					startsAt: secondsToHoursMinutesSecondString(13),
+					weapons: [3040],
+				},
+				{
+					mode: "CB",
+					stageId: 6,
+					startsAt: secondsToHoursMinutesSecondString(307),
+					weapons: [3040],
+				},
+				{
+					mode: "TC",
+					stageId: 2,
+					startsAt: secondsToHoursMinutesSecondString(680),
+					weapons: [3040],
+				},
+				{
+					mode: "SZ",
+					stageId: 9,
+					startsAt: secondsToHoursMinutesSecondString(1186),
+					weapons: [3040],
+				},
+				{
+					mode: "RM",
+					stageId: 2,
+					startsAt: secondsToHoursMinutesSecondString(1386),
+					weapons: [3000],
+				},
+				{
+					mode: "TC",
+					stageId: 4,
+					startsAt: secondsToHoursMinutesSecondString(1586),
+					weapons: [1110],
+				},
+				// there are other matches too...
+			],
+		});
+	}
 }
 
-function realVideoCast() {
-	createVod({
+async function realVideoCast() {
+	await VodRepository.insert({
 		type: "CAST",
 		youtubeUrl: youtubeIdToYoutubeUrl("M4aV-BQWlVg"),
 		date: { day: 2, month: 2, year: 2023 },
@@ -1894,6 +2485,42 @@ const addUnvalidatedUserSubmittedImageStm = sql.prepare(/* sql */ `
     @submitterUserId
   ) returning *
 `);
+
+const teamAndTournamentImages = new Map<string, number>();
+
+function insertTeamAndTournamentImages() {
+	for (const { filename } of SEED_TEAM_IMAGES) {
+		const result = addUnvalidatedUserSubmittedImageStm.get({
+			validatedAt: dateToDatabaseTimestamp(new Date()),
+			url: filename,
+			submitterUserId: ADMIN_ID,
+		}) as Tables["UserSubmittedImage"];
+		teamAndTournamentImages.set(filename, result.id);
+	}
+
+	for (const { filename } of SEED_TOURNAMENT_IMAGES) {
+		const result = addUnvalidatedUserSubmittedImageStm.get({
+			validatedAt: dateToDatabaseTimestamp(new Date()),
+			url: filename,
+			submitterUserId: ADMIN_ID,
+		}) as Tables["UserSubmittedImage"];
+		teamAndTournamentImages.set(filename, result.id);
+	}
+}
+
+function getTeamImageId(teamId: number): number | null {
+	const teamImage = SEED_TEAM_IMAGES.find((img) => img.teamId === teamId);
+	if (!teamImage) return null;
+	return teamAndTournamentImages.get(teamImage.filename) ?? null;
+}
+
+function getTournamentImageId(tournamentId: number): number | null {
+	const tournamentImage = SEED_TOURNAMENT_IMAGES.find(
+		(img) => img.tournamentId === tournamentId,
+	);
+	if (!tournamentImage) return null;
+	return teamAndTournamentImages.get(tournamentImage.filename) ?? null;
+}
 const addArtUserMetadataStm = sql.prepare(/* sql */ `
   insert into "ArtUserMetadata" (
     "artId",
@@ -1904,58 +2531,25 @@ const addArtUserMetadataStm = sql.prepare(/* sql */ `
     @userId
   )
 `);
-// get random image url: https://source.unsplash.com/random/?dog&1
-const artImgUrls = [
-	"https://images.unsplash.com/photo-1611627474565-2367887415d1?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NTA2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1625120742520-3f085b6894ba?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NTI2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1656695607245-9686ce8e1a91?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NTQ1&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1673011526786-c7bf154d2c6d?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NTY5&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1643833994700-059713434c71?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NTc2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1541425284102-3d2c49dcb2bc?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NTk5&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1526946366170-7a81b443c4e6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NjA4&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1551368003-4d96079d0a99?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NjIz&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1595960684234-49d2a004e753?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NjMw&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1676275062470-4b628cf1ce01?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU1NjM5&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1602099081031-767e09dfdbad?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NDYz&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1547532182-bf296f6be875?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NDY5&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1601549838695-57580707e367?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NDc2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1595361315899-72a291112b7b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NDgy&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1676275061266-a28f2f3f4552?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NDg4&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/44/C3EWdWzT8imxs0fKeKoC_blackforrest.JPG?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NDk1&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1628425242605-a0039d89e8b2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NTAx&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1542917118-105d7d34b9ca?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NTEw&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1601549838695-57580707e367?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NTE3&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1660583490803-75c0307c805b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8ZG9nLDF8fHx8fHwxNjg4NTU2NTQ2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1490042706304-06c664f6fd9a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8ZG9nLDF8fHx8fHwxNjg4NTU2NTU4&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1676998652985-fd74c7b2a8d5?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8ZG9nLDF8fHx8fHwxNjg4NTU2NTY0&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1470390356535-d19bbf47bacb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8ZG9nLDF8fHx8fHwxNjg4NTU2NTcx&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1503256207526-0d5d80fa2f47?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8ZG9nLDF8fHx8fHwxNjg4NTU2Njcy&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1604495589307-973bd87d7fa3?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8ZG9nLDF8fHx8fHwxNjg4NTU2Njg2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1563476651637-3e5c5941d432?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NzEw&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1551567819-eef106c515b6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NzE2&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-	"https://images.unsplash.com/photo-1553536590-d28c5d5dee92?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=MnwxfDB8MXxyYW5kb218MHx8bmF0dXJlLDF8fHx8fHwxNjg4NTU2NzIx&ixlib=rb-4.0.3&q=80&utm_campaign=api-credit&utm_medium=referral&utm_source=unsplash_source&w=1080",
-];
+const artImgFilenames = Array.from({ length: SEED_ART_URLS.length }, (_, i) =>
+	getArtFilename(i),
+);
 
 function arts() {
 	const artUsers = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17];
 	const allUsers = userIdsInRandomOrder();
-	const urls = [...artImgUrls];
+	const urls = [...artImgFilenames];
 
 	for (const userId of artUsers) {
 		for (let i = 0; i < faker.helpers.arrayElement([1, 2, 3, 3, 3, 4]); i++) {
-			const getUrl = () => {
-				if (urls.length === 0) {
-					return faker.image.url();
-				}
-
-				return urls.pop() ?? null;
-			};
+			const url = urls.pop()!;
+			if (!url) break;
 
 			const addedArt = addArtStm.get({
 				imgId: (
 					addUnvalidatedUserSubmittedImageStm.get({
 						validatedAt: dateToDatabaseTimestamp(new Date()),
-						url: getUrl(),
+						url,
 						submitterUserId: userId,
 					}) as Tables["UserSubmittedImage"]
 				).id,
@@ -2003,17 +2597,30 @@ function commissionsOpen() {
 }
 
 const SENDOU_IN_FULL_GROUP = true;
-async function groups() {
+async function groups(variation?: SeedVariation | null) {
+	if (variation === "TEAM_MAP_PREFS") {
+		return teamMapPrefsGroups();
+	}
+
 	const users = userIdsInAscendingOrderById()
 		.slice(0, 100)
 		.filter((id) => id !== ADMIN_ID && id !== NZAP_TEST_ID);
 	users.push(NZAP_TEST_ID);
 
+	let nzapGroupId = 0;
+	let sendouGroupId = 0;
+	const nzapGroupMemberIds: number[] = [];
+	const sendouGroupMemberIds: number[] = [];
+
 	for (let i = 0; i < 25; i++) {
-		const group = await QRepository.createGroup({
+		const ownerId = users.pop()!;
+		const group = await SQGroupRepository.createGroup({
 			status: "ACTIVE",
-			userId: users.pop()!,
+			userId: ownerId,
 		});
+
+		if (i === 0) nzapGroupMemberIds.push(ownerId);
+		if (i === 1) sendouGroupMemberIds.push(ownerId);
 
 		const amountOfAdditionalMembers = () => {
 			if (SENDOU_IN_FULL_GROUP) {
@@ -2025,6 +2632,7 @@ async function groups() {
 		};
 
 		for (let j = 0; j < amountOfAdditionalMembers(); j++) {
+			const memberId = users.pop()!;
 			sql
 				.prepare(
 					/* sql */ `
@@ -2034,15 +2642,150 @@ async function groups() {
 				)
 				.run({
 					groupId: group.id,
-					userId: users.pop()!,
+					userId: memberId,
 					role: "REGULAR",
 				});
+
+			if (i === 0) nzapGroupMemberIds.push(memberId);
+			if (i === 1) sendouGroupMemberIds.push(memberId);
 		}
+
+		if (i === 0) nzapGroupId = group.id;
+		if (i === 1) sendouGroupId = group.id;
 
 		if (i === 0 && SENDOU_IN_FULL_GROUP) {
 			users.push(ADMIN_ID);
 		}
 	}
+
+	if (variation === "IN_SQ_MATCH") {
+		// Sendou's side tests the matchmade cascade vote flow, NZAP's side
+		// tests the trusted one-click flow.
+		sql
+			.prepare(
+				/* sql */ `update "Group" set "matchmade" = @matchmade where "id" = @id`,
+			)
+			.run({ matchmade: 1, id: sendouGroupId });
+		sql
+			.prepare(
+				/* sql */ `update "Group" set "matchmade" = @matchmade where "id" = @id`,
+			)
+			.run({ matchmade: 0, id: nzapGroupId });
+
+		const mapList = randomMapList(sendouGroupId, nzapGroupId);
+		const memento = buildSeedMemento({
+			mapList,
+			alphaGroupId: sendouGroupId,
+			bravoGroupId: nzapGroupId,
+			alphaMemberIds: sendouGroupMemberIds,
+			bravoMemberIds: nzapGroupMemberIds,
+		});
+
+		const createdMatch = await SQMatchRepository.create({
+			alphaGroupId: sendouGroupId,
+			bravoGroupId: nzapGroupId,
+			mapList,
+			memento,
+		});
+
+		const guaranteedWeaponPoolUserIds = [
+			sendouGroupMemberIds[1],
+			sendouGroupMemberIds[2],
+			nzapGroupMemberIds[1],
+			nzapGroupMemberIds[2],
+		].filter((id): id is number => typeof id === "number");
+		for (const userId of guaranteedWeaponPoolUserIds) {
+			const weapons: Array<{ weaponSplId: MainWeaponId; isFavorite: number }> =
+				[
+					{ weaponSplId: 0, isFavorite: 1 },
+					{ weaponSplId: 2000, isFavorite: 0 },
+					{ weaponSplId: 4000, isFavorite: 0 },
+				];
+			await db
+				.insertInto("UserWeaponPool")
+				.values(
+					weapons.map((w, i) => ({
+						userId,
+						sortOrder: i,
+						weaponSplId: w.weaponSplId,
+						isFavorite: w.isFavorite,
+					})),
+				)
+				.onConflict((oc) => oc.doNothing())
+				.execute();
+		}
+
+		if (createdMatch.chatCode) {
+			await ChatSystemMessage.setMetadata({
+				chatCode: createdMatch.chatCode,
+				header: `Match #${createdMatch.id}`,
+				subtitle: "SendouQ",
+				url: sendouQMatchPage(createdMatch.id),
+				imageUrl: `${navIconUrl("sendouq")}.avif`,
+				participantUserIds: [...sendouGroupMemberIds, ...nzapGroupMemberIds],
+				expiresAfter: { hours: 2 },
+			});
+		}
+	}
+}
+
+async function teamMapPrefsGroups() {
+	const arMemberIds = (
+		sql
+			.prepare(
+				/*sql*/ `select "userId" from "AllTeamMember" where "teamId" = 1 and "leftAt" is null and "userId" != ?`,
+			)
+			.all(ADMIN_ID) as any[]
+	).map((row: any) => row.userId as number);
+
+	const arMemberSet = new Set(arMemberIds);
+	const users = userIdsInAscendingOrderById()
+		.slice(0, 100)
+		.filter(
+			(id) => id !== ADMIN_ID && id !== NZAP_TEST_ID && !arMemberSet.has(id),
+		);
+
+	const nzapGroup = await SQGroupRepository.createGroup({
+		status: "ACTIVE",
+		userId: NZAP_TEST_ID,
+	});
+	for (let j = 0; j < 3; j++) {
+		sql
+			.prepare(
+				/* sql */ `
+				insert into "GroupMember" ("groupId", "userId", "role")
+				values (@groupId, @userId, @role)
+			`,
+			)
+			.run({
+				groupId: nzapGroup.id,
+				userId: users.pop()!,
+				role: "REGULAR",
+			});
+	}
+
+	const adminGroup = await SQGroupRepository.createGroup({
+		status: "ACTIVE",
+		userId: ADMIN_ID,
+	});
+	for (const memberId of arMemberIds) {
+		sql
+			.prepare(
+				/* sql */ `
+				insert into "GroupMember" ("groupId", "userId", "role")
+				values (@groupId, @userId, @role)
+			`,
+			)
+			.run({
+				groupId: adminGroup.id,
+				userId: memberId,
+				role: "REGULAR",
+			});
+	}
+
+	sql
+		.prepare(/*sql*/ `update "Group" set "teamId" = 1 where "id" = ?`)
+		.run(adminGroup.id);
 }
 
 const randomMapList = (
@@ -2074,6 +2817,108 @@ const randomMapList = (
 
 	return mapList;
 };
+
+function buildSeedMemento({
+	mapList,
+	alphaGroupId,
+	bravoGroupId,
+	alphaMemberIds,
+	bravoMemberIds,
+}: {
+	mapList: TournamentMapListMap[];
+	alphaGroupId: number;
+	bravoGroupId: number;
+	alphaMemberIds: number[];
+	bravoMemberIds: number[];
+}): ParsedMemento {
+	const userPools = new Map<number, Map<ModeShort, Set<StageId>>>();
+
+	const addVote = (userId: number, mode: ModeShort, stageId: StageId) => {
+		let modes = userPools.get(userId);
+		if (!modes) {
+			modes = new Map();
+			userPools.set(userId, modes);
+		}
+		let stages = modes.get(mode);
+		if (!stages) {
+			stages = new Set();
+			modes.set(mode, stages);
+		}
+		stages.add(stageId);
+	};
+
+	for (const map of mapList) {
+		const candidates: number[] =
+			map.source === "BOTH"
+				? [...alphaMemberIds, ...bravoMemberIds]
+				: map.source === alphaGroupId
+					? alphaMemberIds
+					: map.source === bravoGroupId
+						? bravoMemberIds
+						: [];
+
+		if (candidates.length === 0) continue;
+
+		const voterCount = faker.number.int({ min: 1, max: candidates.length });
+		const voters = faker.helpers.arrayElements(candidates, voterCount);
+
+		for (const voterId of voters) {
+			addVote(voterId, map.mode, map.stageId);
+		}
+	}
+
+	const pools: ParsedMemento["pools"] = Array.from(userPools.entries()).map(
+		([userId, modes]) => ({
+			userId,
+			pool: Array.from(modes.entries()).map(([mode, stages]) => ({
+				mode,
+				stages: Array.from(stages),
+			})),
+		}),
+	);
+
+	const tierNames = [
+		"LEVIATHAN",
+		"DIAMOND",
+		"PLATINUM",
+		"GOLD",
+		"SILVER",
+		"BRONZE",
+		"IRON",
+	] as const;
+
+	const users: ParsedMemento["users"] = {};
+	for (const userId of [...alphaMemberIds, ...bravoMemberIds]) {
+		const tierName = faker.helpers.arrayElement(tierNames);
+		users[userId] = {
+			skill: {
+				ordinal: faker.number.float({ min: 1000, max: 3000 }),
+				tier: {
+					name: tierName,
+					isPlus: faker.datatype.boolean(),
+				},
+				approximate: false,
+			},
+		};
+	}
+
+	const groups: ParsedMemento["groups"] = {
+		[alphaGroupId]: {
+			tier: {
+				name: faker.helpers.arrayElement(tierNames),
+				isPlus: faker.datatype.boolean(),
+			},
+		},
+		[bravoGroupId]: {
+			tier: {
+				name: faker.helpers.arrayElement(tierNames),
+				isPlus: faker.datatype.boolean(),
+			},
+		},
+	};
+
+	return { users, groups, pools };
+}
 
 const MATCHES_COUNT = 500;
 
@@ -2120,15 +2965,14 @@ async function playedMatches() {
 		// -> create groups
 		for (let i = 0; i < 2; i++) {
 			const users = i === 0 ? [...groupAlphaMembers] : [...groupBravoMembers];
-			const group = await QRepository.createGroup({
+			const group = await SQGroupRepository.createGroup({
 				status: "ACTIVE",
 				userId: users.pop()!,
 			});
 
 			// -> add regular members of groups
 			for (let i = 0; i < 3; i++) {
-				addMember({
-					groupId: group.id,
+				await SQGroupRepository.addMember(group.id, {
 					userId: users.pop()!,
 				});
 			}
@@ -2142,7 +2986,7 @@ async function playedMatches() {
 
 		invariant(groupAlpha !== 0 && groupBravo !== 0, "groups not created");
 
-		const match = createMatch({
+		const match = await SQMatchRepository.create({
 			alphaGroupId: groupAlpha,
 			bravoGroupId: groupBravo,
 			mapList: randomMapList(groupAlpha, groupBravo),
@@ -2179,61 +3023,28 @@ async function playedMatches() {
 			["ALPHA", "BRAVO", "BRAVO", "ALPHA", "ALPHA", "ALPHA"],
 			["ALPHA", "BRAVO", "ALPHA", "BRAVO", "BRAVO", "BRAVO"],
 		]) as ("ALPHA" | "BRAVO")[];
-		const winner = winnersArrayToWinner(winners);
-		const finishedMatch = findMatchById(match.id)!;
 
-		const { newSkills, differences } = calculateMatchSkills({
-			groupMatchId: match.id,
-			winner: winner === "ALPHA" ? groupAlphaMembers : groupBravoMembers,
-			loser: winner === "ALPHA" ? groupBravoMembers : groupAlphaMembers,
-			loserGroupId: winner === "ALPHA" ? groupBravo : groupAlpha,
-			winnerGroupId: winner === "ALPHA" ? groupAlpha : groupBravo,
-		});
-		const members = [
-			...(await QMatchRepository.findGroupById({
-				groupId: match.alphaGroupId,
-			}))!.members.map((m) => ({
-				...m,
-				groupId: match.alphaGroupId,
-			})),
-			...(await QMatchRepository.findGroupById({
-				groupId: match.alphaGroupId,
-			}))!.members.map((m) => ({
-				...m,
-				groupId: match.bravoGroupId,
-			})),
-		];
-		sql.transaction(() => {
-			reportScore({
+		const reporterUserId =
+			faker.number.float(1) > 0.5 ? groupAlphaMembers[0] : groupBravoMembers[0];
+		for (const [mapIndex, winner] of winners.entries()) {
+			await SQMatchRepository.reportMapWinner({
 				matchId: match.id,
-				reportedByUserId:
-					faker.number.float(1) > 0.5
-						? groupAlphaMembers[0]
-						: groupBravoMembers[0],
-				winners,
+				winnerId: winner === "ALPHA" ? groupAlpha : groupBravo,
+				reportedByUserId: reporterUserId,
+				reportedCount: mapIndex,
+				isStaffReport: true,
 			});
-			addSkills({
-				skills: newSkills,
-				differences,
-				groupMatchId: match.id,
-				oldMatchMemento: { users: {}, groups: {}, pools: [] },
-			});
-			setGroupAsInactive(groupAlpha);
-			setGroupAsInactive(groupBravo);
-			addMapResults(summarizeMaps({ match: finishedMatch, members, winners }));
-			addPlayerResults(
-				summarizePlayerResults({ match: finishedMatch, members, winners }),
-			);
-		})();
+		}
 
 		// -> add weapons for 90% of matches
 		if (faker.number.float(1) > 0.9) continue;
+		const finishedMatch = (await SQMatchRepository.findById(match.id))!;
 		const users = [...groupAlphaMembers, ...groupBravoMembers];
 		const mapsWithUsers = users.flatMap((u) =>
-			finishedMatch.mapList.map((m) => ({ map: m, user: u })),
+			finishedMatch.mapList.map((_, mapIndex) => ({ mapIndex, user: u })),
 		);
 
-		addReportedWeapons(
+		await ReportedWeaponRepository.createMany(
 			mapsWithUsers.map((mu) => {
 				const weapon = () => {
 					if (faker.number.float(1) < 0.9) return defaultWeapons[mu.user];
@@ -2248,13 +3059,31 @@ async function playedMatches() {
 				};
 
 				return {
-					groupMatchMapId: mu.map.id,
+					groupMatchId: match.id,
+					mapIndex: mu.mapIndex,
 					userId: mu.user,
 					weaponSplId: weapon(),
 				};
 			}),
 		);
 	}
+
+	// skills are inserted with createdAt of the current time, but matches are
+	// backdated above. Sync skill createdAt to the match date so the season
+	// progression chart on the user seasons page has data spread across days.
+	sql
+		.prepare(
+			/* sql */ `
+      update "Skill"
+      set "createdAt" = (
+        select "createdAt"
+        from "GroupMatch"
+        where "GroupMatch"."id" = "Skill"."groupMatchId"
+      )
+      where "groupMatchId" is not null
+    `,
+		)
+		.run();
 }
 
 async function friendCodes() {
@@ -2347,6 +3176,10 @@ async function scrimPosts() {
 		return { maxDiv, minDiv };
 	};
 
+	const maps = (): "SZ" | "ALL" | "RANKED" | null => {
+		return faker.helpers.arrayElement(["SZ", "ALL", "RANKED", null, null]);
+	};
+
 	const users = () => {
 		const count = faker.helpers.arrayElement([4, 4, 4, 4, 4, 4, 5, 5, 5, 6]);
 
@@ -2363,10 +3196,46 @@ async function scrimPosts() {
 		return result;
 	};
 
-	for (let i = 0; i < 20; i++) {
+	// Deterministic post 1: admin (Sendou) vs N-ZAP. The e2e map-by-map test
+	// navigates straight to /scrims/1 and relies on this being an accepted
+	// scrim with admin on the ALPHA side and N-ZAP on the BRAVO side.
+	const adminVsNzapAt = date(true);
+	const adminVsNzapPostId = await ScrimPostRepository.insert({
+		at: adminVsNzapAt,
+		rangeEnd: null,
+		isScheduledForFuture: true,
+		teamId: null,
+		text: null,
+		visibility: null,
+		users: users()
+			.map((u) => ({ ...u, isOwner: 0 }))
+			.concat({ userId: ADMIN_ID, isOwner: 1 }),
+		managedByAnyone: true,
+		maps: null,
+		mapsTournamentId: 4,
+	});
+	await ScrimPostRepository.insertRequest({
+		scrimPostId: adminVsNzapPostId,
+		users: users()
+			.map((u) => ({ ...u, isOwner: 0 }))
+			.concat({ userId: NZAP_TEST_ID, isOwner: 1 }),
+		message: null,
+	});
+	await ScrimPostRepository.acceptRequest(1);
+
+	for (let i = 0; i < 19; i++) {
 		const divs = divRange();
+		const atTime = date();
+		const hasRangeEnd = Math.random() > 0.5;
 		await ScrimPostRepository.insert({
-			at: date(),
+			at: atTime,
+			rangeEnd: hasRangeEnd
+				? dateToDatabaseTimestamp(
+						add(databaseTimestampToDate(atTime), {
+							hours: faker.helpers.rangeToNumber({ min: 1, max: 3 }),
+						}),
+					)
+				: null,
 			isScheduledForFuture: true,
 			maxDiv: divs?.maxDiv,
 			minDiv: divs?.minDiv,
@@ -2378,11 +3247,14 @@ async function scrimPosts() {
 			visibility: null,
 			users: users(),
 			managedByAnyone: true,
+			maps: maps(),
+			mapsTournamentId: null,
 		});
 	}
 
+	const adminPostAtTime = date(true); // admin's scrim is always at least 1 hour in the future
 	const adminPostId = await ScrimPostRepository.insert({
-		at: date(true), // admin's scrim is always at least 1 hour in the future
+		at: adminPostAtTime,
 		isScheduledForFuture: true,
 		text:
 			faker.number.float(1) > 0.5
@@ -2393,14 +3265,24 @@ async function scrimPosts() {
 			.map((u) => ({ ...u, isOwner: 0 }))
 			.concat({ userId: ADMIN_ID, isOwner: 1 }),
 		managedByAnyone: true,
+		maps: maps(),
+		mapsTournamentId: null,
 	});
 	await ScrimPostRepository.insertRequest({
 		scrimPostId: adminPostId,
 		users: users(),
+		message:
+			faker.number.float(1) > 0.5
+				? faker.lorem.sentence({ min: 5, max: 15 })
+				: null,
 	});
 	await ScrimPostRepository.insertRequest({
 		scrimPostId: adminPostId,
 		users: users(),
+		message:
+			faker.number.float(1) > 0.5
+				? faker.lorem.sentence({ min: 5, max: 15 })
+				: null,
 	});
 }
 
@@ -2411,7 +3293,9 @@ async function scrimPostRequests() {
 		.where("TeamMember.teamId", "=", 1)
 		.execute();
 
-	for (const id of [1, 5, 12, 14, 19]) {
+	// Post 1 is already accepted (admin-vs-nzap, seeded in scrimPosts()), so it
+	// is excluded here.
+	for (const id of [5, 12, 14, 19]) {
 		await ScrimPostRepository.insertRequest({
 			scrimPostId: id,
 			users: allianceRogueMembers.map((member) => ({
@@ -2419,10 +3303,12 @@ async function scrimPostRequests() {
 				isOwner: member.userId === ADMIN_ID ? 1 : 0,
 			})),
 			teamId: 1,
+			message:
+				faker.number.float(1) > 0.5
+					? faker.lorem.sentence({ min: 5, max: 15 })
+					: null,
 		});
 	}
-
-	await ScrimPostRepository.acceptRequest(3);
 }
 
 async function associations() {
@@ -2503,8 +3389,7 @@ async function notifications() {
 		{
 			type: "TO_CHECK_IN_OPENED",
 			meta: { tournamentId: 1, tournamentName: "PICNIC #2" },
-			pictureUrl:
-				"http://localhost:5173/static-assets/img/tournament-logos/pn.png",
+			pictureUrl: "/static-assets/img/tournament-logos/pn.avif",
 		},
 	];
 
@@ -2581,8 +3466,220 @@ async function organization() {
 				role: "MEMBER",
 				roleDisplayName: null,
 			},
+			{
+				userId: ORG_ADMIN_TEST_ID,
+				role: "ADMIN",
+				roleDisplayName: null,
+			},
 		],
-		series: [],
+		series: [
+			{
+				name: "PICNIC",
+				description: "PICNIC tournament series",
+				showLeaderboard: false,
+			},
+		],
 		badges: [],
 	});
+
+	sql
+		.prepare(
+			`UPDATE "TournamentOrganizationSeries"
+			SET "tierHistory" = '[3, 4, 3]'
+			WHERE "organizationId" = 1 AND "name" = 'PICNIC'`,
+		)
+		.run();
+}
+
+const SENDOU_FRIEND_IDS_IN_LOOKING_GROUPS = [150, 151, 152, 153];
+const SENDOU_FRIEND_IDS_IN_TOURNAMENT_LFG = [100, 101];
+const SENDOU_FRIEND_IDS_OTHER = [102, 103];
+
+async function friendships(variation?: SeedVariation | null) {
+	const allFriendIds = [
+		...SENDOU_FRIEND_IDS_IN_LOOKING_GROUPS,
+		...SENDOU_FRIEND_IDS_IN_TOURNAMENT_LFG,
+		...SENDOU_FRIEND_IDS_OTHER,
+	];
+
+	for (const friendId of allFriendIds) {
+		const userOneId = Math.min(ADMIN_ID, friendId);
+		const userTwoId = Math.max(ADMIN_ID, friendId);
+
+		sql
+			.prepare(
+				/* sql */ `
+				insert into "Friendship" ("userOneId", "userTwoId")
+				values (@userOneId, @userTwoId)
+			`,
+			)
+			.run({ userOneId, userTwoId });
+	}
+
+	if (variation === "NO_SQ_GROUPS" || variation === "TEAM_MAP_PREFS") return;
+
+	for (const friendId of SENDOU_FRIEND_IDS_IN_LOOKING_GROUPS) {
+		const group = await SQGroupRepository.createGroup({
+			status: "ACTIVE",
+			userId: friendId,
+		});
+
+		const additionalMemberCount = faker.helpers.arrayElement([0, 1, 2]);
+		const additionalMembers = [200, 201, 202, 203, 204, 205].slice(
+			0,
+			additionalMemberCount,
+		);
+
+		for (const memberId of additionalMembers) {
+			sql
+				.prepare(
+					/* sql */ `
+					insert into "GroupMember" ("groupId", "userId", "role")
+					values (@groupId, @userId, @role)
+				`,
+				)
+				.run({
+					groupId: group.id,
+					userId: memberId + (friendId - 150) * 10,
+					role: "REGULAR",
+				});
+		}
+	}
+}
+
+function liveStreams() {
+	const userIds = userIdsInAscendingOrderById();
+
+	// Add deterministic streams for E2E testing
+	// Users 6 and 7 are in ITZ tournament team 102
+	const deterministicStreams = [
+		{ userId: 6, viewerCount: 150, twitch: "test_player_stream_1" },
+		{ userId: 7, viewerCount: 75, twitch: "test_player_stream_2" },
+		// Cast-only stream (user 100 is not in ITZ tournament teams)
+		{ userId: 100, viewerCount: 500, twitch: "test_cast_stream" },
+	];
+
+	for (const stream of deterministicStreams) {
+		sql
+			.prepare(
+				`
+			insert into "LiveStream" ("userId", "viewerCount", "thumbnailUrl", "twitch")
+			values ($userId, $viewerCount, $thumbnailUrl, $twitch)
+			`,
+			)
+			.run({
+				userId: stream.userId,
+				viewerCount: stream.viewerCount,
+				thumbnailUrl: "https://picsum.photos/320/180",
+				twitch: stream.twitch,
+			});
+	}
+
+	const streamingUserIds = [
+		...userIds.slice(3, 20),
+		...userIds.slice(40, 50),
+		...userIds.slice(100, 110),
+	].filter((id) => !deterministicStreams.some((s) => s.userId === id));
+
+	const shuffledStreamers = faker.helpers.shuffle(streamingUserIds);
+	const selectedStreamers = shuffledStreamers.slice(0, 17);
+
+	for (const userId of selectedStreamers) {
+		const viewerCount = faker.helpers.weightedArrayElement([
+			{ value: faker.number.int({ min: 5, max: 30 }), weight: 5 },
+			{ value: faker.number.int({ min: 31, max: 100 }), weight: 3 },
+			{ value: faker.number.int({ min: 101, max: 500 }), weight: 2 },
+			{ value: faker.number.int({ min: 501, max: 2000 }), weight: 1 },
+		]);
+
+		const thumbnailUrl = faker.image.urlPicsumPhotos({
+			width: 320,
+			height: 180,
+		});
+
+		const twitch = `fake_${nanoid()}`.toLowerCase();
+		sql
+			.prepare(
+				`
+			insert into "LiveStream" ("userId", "viewerCount", "thumbnailUrl", "twitch")
+			values ($userId, $viewerCount, $thumbnailUrl, $twitch)
+			`,
+			)
+			.run({
+				userId,
+				viewerCount,
+				thumbnailUrl,
+				twitch,
+			});
+	}
+}
+
+function splatoonRotations() {
+	const nowUnix = Math.floor(Date.now() / 1000);
+	const TWO_HOURS = 2 * 60 * 60;
+
+	const currentStart = nowUnix - (nowUnix % TWO_HOURS);
+
+	const slotStart = (slot: number) => currentStart + slot * TWO_HOURS;
+	const slotEnd = (slot: number) => slotStart(slot) + TWO_HOURS;
+
+	// based on real splatoon3.ink data with realistic stage/mode combinations
+	const rotationData = [
+		{ type: "SERIES", mode: "SZ", stageId1: 0, stageId2: 11 },
+		{ type: "SERIES", mode: "TC", stageId1: 1, stageId2: 24 },
+		{ type: "SERIES", mode: "RM", stageId1: 7, stageId2: 23 },
+		{ type: "SERIES", mode: "CB", stageId1: 0, stageId2: 9 },
+		{ type: "SERIES", mode: "SZ", stageId1: 13, stageId2: 21 },
+		{ type: "SERIES", mode: "RM", stageId1: 3, stageId2: 17 },
+		{ type: "SERIES", mode: "SZ", stageId1: 6, stageId2: 7 },
+		{ type: "SERIES", mode: "TC", stageId1: 8, stageId2: 23 },
+		{ type: "SERIES", mode: "CB", stageId1: 2, stageId2: 18 },
+		{ type: "SERIES", mode: "RM", stageId1: 10, stageId2: 20 },
+		{ type: "SERIES", mode: "SZ", stageId1: 12, stageId2: 11 },
+		{ type: "SERIES", mode: "TC", stageId1: 4, stageId2: 17 },
+		{ type: "OPEN", mode: "RM", stageId1: 14, stageId2: 23 },
+		{ type: "OPEN", mode: "CB", stageId1: 10, stageId2: 11 },
+		{ type: "OPEN", mode: "SZ", stageId1: 2, stageId2: 17 },
+		{ type: "OPEN", mode: "TC", stageId1: 15, stageId2: 20 },
+		{ type: "OPEN", mode: "RM", stageId1: 12, stageId2: 19 },
+		{ type: "OPEN", mode: "TC", stageId1: 11, stageId2: 16 },
+		{ type: "OPEN", mode: "CB", stageId1: 5, stageId2: 23 },
+		{ type: "OPEN", mode: "RM", stageId1: 1, stageId2: 7 },
+		{ type: "OPEN", mode: "SZ", stageId1: 3, stageId2: 9 },
+		{ type: "OPEN", mode: "TC", stageId1: 17, stageId2: 18 },
+		{ type: "OPEN", mode: "CB", stageId1: 4, stageId2: 13 },
+		{ type: "OPEN", mode: "RM", stageId1: 15, stageId2: 22 },
+		{ type: "X", mode: "CB", stageId1: 13, stageId2: 7 },
+		{ type: "X", mode: "RM", stageId1: 4, stageId2: 20 },
+		{ type: "X", mode: "TC", stageId1: 10, stageId2: 19 },
+		{ type: "X", mode: "SZ", stageId1: 1, stageId2: 14 },
+		{ type: "X", mode: "CB", stageId1: 4, stageId2: 22 },
+		{ type: "X", mode: "SZ", stageId1: 15, stageId2: 19 },
+		{ type: "X", mode: "RM", stageId1: 18, stageId2: 24 },
+		{ type: "X", mode: "CB", stageId1: 17, stageId2: 14 },
+		{ type: "X", mode: "TC", stageId1: 16, stageId2: 20 },
+		{ type: "X", mode: "SZ", stageId1: 0, stageId2: 23 },
+		{ type: "X", mode: "RM", stageId1: 3, stageId2: 6 },
+		{ type: "X", mode: "CB", stageId1: 9, stageId2: 21 },
+	];
+
+	const ROTATIONS_PER_TYPE = 12;
+
+	for (let i = 0; i < rotationData.length; i++) {
+		const slot = i % ROTATIONS_PER_TYPE;
+		const rotation = rotationData[i];
+
+		sql
+			.prepare(
+				`
+			insert into "SplatoonRotation" ("type", "mode", "stageId1", "stageId2", "startTime", "endTime")
+			values ($type, $mode, $stageId1, $stageId2, $startTime, $endTime)
+			`,
+			)
+			.run({
+				...rotation,
+				startTime: slotStart(slot),
+				endTime: slotEnd(slot),
+			});
+	}
 }

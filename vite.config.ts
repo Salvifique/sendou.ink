@@ -1,51 +1,78 @@
-import { vitePlugin as remix } from "@remix-run/dev";
-import { installGlobals } from "@remix-run/node";
-import { defineConfig } from "vite";
+import { reactRouter } from "@react-router/dev/vite";
+import { sentryReactRouter } from "@sentry/react-router";
+import { defineConfig, loadEnv } from "vite";
 import babel from "vite-plugin-babel";
-import tsconfigPaths from "vite-tsconfig-paths";
-import { configDefaults } from "vitest/config";
 
-installGlobals();
-
-const ReactCompilerConfig = {
-	target: "18",
-};
-
-export default defineConfig(() => {
+export default defineConfig((config) => {
+	const env = loadEnv(config.mode, process.cwd(), "");
 	return {
+		server: {
+			port: Number(env.PORT) || 5173,
+		},
 		ssr: {
 			noExternal: ["react-charts", "react-use"],
 		},
 		plugins: [
-			remix({
-				ignoredRouteFiles: ["**/.*", "**/*.json", "**/components/*"],
-				serverModuleFormat: "esm",
-				future: {
-					v3_fetcherPersist: true,
-					v3_relativeSplatPath: true,
-					v3_throwAbortReason: true,
-					v3_routeConfig: true,
-					v3_lazyRouteDiscovery: true,
+			{
+				// Wraps CSS modules in @layer components so utility classes always win.
+				// The layer order declaration is prepended to each module because in Vite
+				// dev mode, module <style> tags are injected before global stylesheets —
+				// without it the implicit first @layer components would get lowest priority.
+				name: "css-modules-layer",
+				enforce: "pre",
+				transform(code, id) {
+					if (!id.endsWith(".module.css")) return;
+					const layerOrder =
+						"@layer reset, base, elements, components, utilities;";
+					const layer = id.includes("/components/elements/")
+						? "elements"
+						: "components";
+					return {
+						code: `${layerOrder}\n@layer ${layer} {\n${code}\n}`,
+					};
 				},
-			}),
+			},
+			reactRouter(),
 			babel({
-				filter: /\.[jt]sx?$/,
+				include: /\.[jt]sx?$/,
 				babelConfig: {
 					presets: ["@babel/preset-typescript"],
-					plugins: [["babel-plugin-react-compiler", ReactCompilerConfig]],
+					plugins: [["babel-plugin-react-compiler", {}]],
 				},
 			}),
-			tsconfigPaths(),
+			sentryReactRouter(
+				{
+					org: process.env.SENTRY_ORG,
+					project: process.env.SENTRY_PROJECT,
+					authToken: process.env.SENTRY_AUTH_TOKEN,
+					telemetry: false,
+					unstable_sentryVitePluginOptions: {
+						applicationKey: "sendou-ink",
+					},
+				},
+				config,
+			),
 		],
+
 		test: {
-			exclude: [...configDefaults.exclude, "e2e/**"],
+			projects: ["./vitest.unit.config.ts", "./vitest.browser.config.ts"],
+		},
+		define: {
+			__GIT_COMMIT__: JSON.stringify(process.env.RENDER_GIT_COMMIT ?? ""),
 		},
 		build: {
-			// this is mostly done so that i18n jsons as defined in ./app/modules/i18n/loader.ts
-			// do not end up in the js bundle as minimized strings
-			// if we decide later that this is a useful optimization in some cases then we can
-			// switch the value to a callback one that checks the file path
-			assetsInlineLimit: 0,
+			assetsInlineLimit: (filePath: string) => {
+				if (/\/locales\/[^/]+\/[^/]+\.json$/.test(filePath)) return false;
+
+				return undefined;
+			},
+			sourcemap: true,
+		},
+		resolve: {
+			tsconfigPaths: true,
+		},
+		optimizeDeps: {
+			exclude: ["@sentry/react-router"],
 		},
 	};
 });

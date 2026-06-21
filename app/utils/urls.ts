@@ -2,7 +2,7 @@ import slugify from "slugify";
 import type { GearType, Preference, Tables } from "~/db/tables";
 import type { ArtSource } from "~/features/art/art-types";
 import type { AuthErrorCode } from "~/features/auth/core/errors";
-import { serializeBuild } from "~/features/build-analyzer";
+import { serializeBuild } from "~/features/build-analyzer/core/utils";
 import type { CalendarFilters } from "~/features/calendar/calendar-types";
 import type { MapPool } from "~/features/map-list-generator/core/map-pool";
 import type { StageBackgroundStyle } from "~/features/map-planner";
@@ -49,17 +49,11 @@ export const SENDOU_INK_BASE_URL = "https://sendou.ink";
 
 export const BADGES_DOC_LINK =
 	"https://github.com/sendou-ink/sendou.ink/blob/rewrite/docs/badges.md";
+export const API_DOC_LINK =
+	"https://github.com/sendou-ink/sendou.ink/blob/rewrite/docs/dev/api.md";
 
 export const CREATING_TOURNAMENT_DOC_LINK =
 	"https://github.com/sendou-ink/sendou.ink/blob/rewrite/docs/tournament-creation.md";
-
-const USER_SUBMITTED_IMAGE_ROOT =
-	"https://sendou.nyc3.cdn.digitaloceanspaces.com";
-export const userSubmittedImage = (fileName: string) =>
-	`${USER_SUBMITTED_IMAGE_ROOT}/${fileName}`;
-// images with https are not hosted on spaces, this is used for local development
-export const conditionalUserSubmittedImage = (fileName: string) =>
-	fileName.includes("https") ? fileName : userSubmittedImage(fileName);
 
 export const PLUS_SERVER_DISCORD_URL = "https://discord.gg/FW4dKrY";
 export const SENDOU_INK_DISCORD_URL = "https://discord.gg/sendou";
@@ -78,34 +72,39 @@ export const RHODESMAS_FREESOUND_PROFILE_URL =
 	"https://freesound.org/people/rhodesmas/";
 export const SPR_INFO_URL =
 	"https://web.archive.org/web/20250513034545/https://www.pgstats.com/articles/introducing-spr-and-uf";
+export const SPLATOON3_INK_SCHEDULES_URL =
+	"https://splatoon3.ink/data/schedules.json";
 
 export const bskyUrl = (accountName: string) =>
 	`https://bsky.app/profile/${accountName}`;
 export const twitchUrl = (accountName: string) =>
 	`https://twitch.tv/${accountName}`;
+export const youtubeUrl = (channelId: string) =>
+	`https://youtube.com/channel/${channelId}`;
 
 export const LOG_IN_URL = "/auth";
 export const LOG_OUT_URL = "/auth/logout";
 export const ADMIN_PAGE = "/admin";
+export const API_PAGE = "/api";
 export const ARTICLES_MAIN_PAGE = "/a";
 export const FAQ_PAGE = "/faq";
-export const PRIVACY_POLICY_PAGE = "/privacy-policy";
 export const SUPPORT_PAGE = "/support";
 export const CONTRIBUTIONS_PAGE = "/contributions";
 export const BADGES_PAGE = "/badges";
 export const BUILDS_PAGE = "/builds";
-export const USER_SEARCH_PAGE = "/u";
 export const TEAM_SEARCH_PAGE = "/t";
-export const NEW_TEAM_PAGE = "/t?new=true";
+export const NEW_TEAM_PAGE = "/t/new";
 export const CALENDAR_PAGE = "/calendar";
 export const CALENDAR_NEW_PAGE = "/calendar/new";
 export const TOURNAMENT_NEW_PAGE = "/calendar/new?tournament=true";
-export const CALENDAR_TOURNAMENTS_PAGE = "/calendar?tournaments=true";
+export const ORGANIZATION_NEW_PAGE = "/org/new";
 export const STOP_IMPERSONATING_URL = "/auth/impersonate/stop";
 export const SEED_URL = "/seed";
 export const PLANNER_URL = "/plans";
 export const MAPS_URL = "/maps";
+export const TIER_LIST_MAKER_URL = "/tier-list-maker";
 export const ANALYZER_URL = "/analyzer";
+export const COMP_ANALYZER_URL = "/comp-analyzer";
 export const OBJECT_DAMAGE_CALCULATOR_URL = "/object-damage-calculator";
 export const VODS_PAGE = "/vods";
 export const LEADERBOARDS_PAGE = "/leaderboards";
@@ -113,7 +112,7 @@ export const LINKS_PAGE = "/links";
 export const SENDOUQ_PAGE = "/q";
 export const SENDOUQ_RULES_PAGE = "/q/rules";
 export const SENDOUQ_INFO_PAGE = "/q/info";
-export const SENDOUQ_SETTINGS_PAGE = "/q/settings";
+export const MATCH_PROFILE_PAGE = "/settings?tab=match-profile";
 export const SENDOUQ_PREPARING_PAGE = "/q/preparing";
 export const SENDOUQ_LOOKING_PAGE = "/q/looking";
 export const SENDOUQ_LOOKING_PREVIEW_PAGE = "/q/looking?preview=true";
@@ -121,6 +120,8 @@ export const SENDOUQ_STREAMS_PAGE = "/q/streams";
 export const TIERS_PAGE = "/tiers";
 export const SUSPENDED_PAGE = "/suspended";
 export const LFG_PAGE = "/lfg";
+export const EVENTS_PAGE = "/events";
+export const FRIENDS_PAGE = "/friends";
 export const SETTINGS_PAGE = "/settings";
 export const LUTI_PAGE = "/luti";
 export const PLUS_VOTING_PAGE = "/plus/voting";
@@ -129,7 +130,6 @@ export const BLANK_IMAGE_URL = "/static-assets/img/blank.gif";
 export const COMMON_PREVIEW_IMAGE =
 	"/static-assets/img/layout/common-preview.png";
 export const ERROR_GIRL_IMAGE_PATH = "/static-assets/img/layout/error-girl";
-export const LOGO_PATH = "/static-assets/img/layout/logo";
 export const SENDOU_LOVE_EMOJI_PATH = "/static-assets/img/layout/sendou_love";
 export const FIRST_PLACEMENT_ICON_PATH =
 	"/static-assets/svg/placements/first.svg";
@@ -141,7 +141,7 @@ export const THIRD_PLACEMENT_ICON_PATH =
 export const soundPath = (fileName: string) =>
 	`/static-assets/sounds/${fileName}.wav`;
 
-export const GET_TRUSTERS_ROUTE = "/trusters";
+export const GET_FRIENDS_FOR_ADDING_ROUTE = "/friends-for-adding";
 export const PATRONS_LIST_ROUTE = "/patrons-list";
 
 export const NOTIFICATIONS_URL = "/notifications";
@@ -181,8 +181,17 @@ export const userArtPage = (
 	user: UserLinkArgs,
 	source?: ArtSource,
 	bigArtId?: number,
-) =>
-	`${userPage(user)}/art${source ? `?source=${source}` : ""}${bigArtId ? `?big=${bigArtId}` : ""}`;
+) => {
+	const params = new URLSearchParams();
+	if (source) {
+		params.set("source", source);
+	}
+	if (typeof bigArtId === "number") {
+		params.set("big", String(bigArtId));
+	}
+
+	return `${userPage(user)}/art${params.size > 0 ? `?${params.toString()}` : ""}`;
+};
 export const newArtPage = (artId?: Tables["Art"]["id"]) =>
 	`${artPage()}/new${artId ? `?art=${artId}` : ""}`;
 export const userNewBuildPage = (
@@ -230,7 +239,7 @@ export const leaderboardsPage = (args: {
 	type?: "USER" | "TEAM";
 }) => {
 	const params = new URLSearchParams();
-	if (args.season) {
+	if (typeof args.season === "number") {
 		params.set("season", String(args.season));
 	}
 	if (args.type) {
@@ -270,6 +279,7 @@ export const weaponBuildStatsPage = (weaponSlug: string) =>
 	`${weaponBuildPage(weaponSlug)}/stats`;
 export const weaponBuildPopularPage = (weaponSlug: string) =>
 	`${weaponBuildPage(weaponSlug)}/popular`;
+export const weaponParamsPage = (weaponSlug: string) => `/params/${weaponSlug}`;
 
 export const calendarPage = (args?: {
 	filters?: CalendarFilters;
@@ -304,6 +314,8 @@ export const tournamentEditPage = (eventId: number) =>
 export const calendarReportWinnersPage = (eventId: number) =>
 	`/calendar/${eventId}/report-winners`;
 export const tournamentPage = (tournamentId: number) => `/to/${tournamentId}`;
+export const tournamentTeamsPage = (tournamentId: number) =>
+	`/to/${tournamentId}/teams`;
 export const tournamentTeamPage = ({
 	tournamentId,
 	tournamentTeamId,
@@ -311,12 +323,28 @@ export const tournamentTeamPage = ({
 	tournamentId: number;
 	tournamentTeamId: number;
 }) => `/to/${tournamentId}/teams/${tournamentTeamId}`;
+export const tournamentInfoPage = (tournamentId: number) =>
+	`/to/${tournamentId}/info`;
 export const tournamentRegisterPage = (tournamentId: number) =>
 	`/to/${tournamentId}/register`;
-export const tournamentMapsPage = (tournamentId: number) =>
-	`/to/${tournamentId}/maps`;
+export const tournamentRulesPage = (tournamentId: number) =>
+	`/to/${tournamentId}/rules`;
 export const tournamentAdminPage = (tournamentId: number) =>
 	`/to/${tournamentId}/admin`;
+export const tournamentAdminRegistrationPage = (tournamentId: number) =>
+	`${tournamentAdminPage(tournamentId)}/registration`;
+export const tournamentAdminRegistrationEditPage = (
+	tournamentId: number,
+	tournamentTeamId: number,
+) => `${tournamentAdminRegistrationPage(tournamentId)}/${tournamentTeamId}`;
+export const tournamentAdminImportTeamsPage = ({
+	tournamentId,
+	fromTournamentId,
+}: {
+	tournamentId: number;
+	fromTournamentId: number;
+}) =>
+	`${tournamentAdminPage(tournamentId)}/import-teams?fromTournamentId=${fromTournamentId}`;
 export const tournamentBracketsPage = ({
 	tournamentId,
 	bracketIdx,
@@ -342,8 +370,6 @@ export const tournamentDivisionsPage = (tournamentId: number) =>
 	`/to/${tournamentId}/divisions`;
 export const tournamentResultsPage = (tournamentId: number) =>
 	`/to/${tournamentId}/results`;
-export const tournamentBracketsSubscribePage = (tournamentId: number) =>
-	`/to/${tournamentId}/brackets/subscribe`;
 export const tournamentMatchPage = ({
 	tournamentId,
 	matchId,
@@ -351,13 +377,6 @@ export const tournamentMatchPage = ({
 	tournamentId: number;
 	matchId: number;
 }) => `/to/${tournamentId}/matches/${matchId}`;
-export const tournamentMatchSubscribePage = ({
-	tournamentId,
-	matchId,
-}: {
-	tournamentId: number;
-	matchId: number;
-}) => `/to/${tournamentId}/matches/${matchId}/subscribe`;
 export const tournamentJoinPage = ({
 	tournamentId,
 	inviteCode,
@@ -366,7 +385,7 @@ export const tournamentJoinPage = ({
 	inviteCode: string;
 }) => `/to/${tournamentId}/join?code=${inviteCode}`;
 export const tournamentSubsPage = (tournamentId: number) => {
-	return `/to/${tournamentId}/subs`;
+	return `/to/${tournamentId}/looking`;
 };
 export const tournamentStreamsPage = (tournamentId: number) => {
 	return `/to/${tournamentId}/streams`;
@@ -378,8 +397,14 @@ export const tournamentOrganizationPage = ({
 }: {
 	organizationSlug: string;
 	tournamentName?: string;
-}) =>
-	`/org/${organizationSlug}${tournamentName ? `?source=${decodeURIComponent(tournamentName)}` : ""}`;
+}) => {
+	const params = new URLSearchParams();
+	if (tournamentName) {
+		params.set("source", tournamentName);
+	}
+
+	return `/org/${organizationSlug}${params.size > 0 ? `?${params.toString()}` : ""}`;
+};
 export const tournamentOrganizationEditPage = (organizationSlug: string) =>
 	`${tournamentOrganizationPage({ organizationSlug })}/edit`;
 
@@ -425,7 +450,7 @@ export const getWeaponUsage = ({
 };
 
 export const mapsPageWithMapPool = (mapPool: MapPool) =>
-	`/maps?readonly&pool=${mapPool.serialized}`;
+	`${MAPS_URL}?readonly&pool=${mapPool.serialized}`;
 export const articlePage = (slug: string) => `${ARTICLES_MAIN_PAGE}/${slug}`;
 export const analyzerPage = (args?: {
 	weaponId: MainWeaponId;
@@ -443,15 +468,6 @@ export const objectDamageCalculatorPage = (weaponId?: MainWeaponId) =>
 		typeof weaponId === "number" ? `?weapon=${weaponId}` : ""
 	}`;
 
-export const uploadImagePage = (
-	args:
-		| { type: "team-pfp" | "team-banner"; teamCustomUrl: string }
-		| { type: "org-pfp"; slug: string },
-) =>
-	args.type === "org-pfp"
-		? `/upload?type=${args.type}&slug=${args.slug}`
-		: `/upload?type=${args.type}&team=${args.teamCustomUrl}`;
-
 export const vodVideoPage = (videoId: number) => `${VODS_PAGE}/${videoId}`;
 
 export const lfgNewPostPage = (postId?: number) =>
@@ -464,6 +480,8 @@ export const badgeUrl = ({
 	code: Tables["Badge"]["code"];
 	extension?: "gif";
 }) => `/static-assets/badges/${code}${extension ? `.${extension}` : ""}`;
+export const gameBadgeUrl = (id: string) =>
+	`/static-assets/img/badges/${id}.avif`;
 export const articlePreviewUrl = (slug: string) =>
 	`/static-assets/img/article-previews/${slug}.png`;
 
@@ -485,6 +503,9 @@ export const outlinedMainWeaponImageUrl = (mainWeaponSplId: MainWeaponId) =>
 export const outlinedFiveStarMainWeaponImageUrl = (
 	mainWeaponSplId: MainWeaponId,
 ) => `/static-assets/img/main-weapons-outlined-2/${mainWeaponSplId}`;
+export const outlinedTenStarMainWeaponImageUrl = (
+	mainWeaponSplId: MainWeaponId,
+) => `/static-assets/img/main-weapons-outlined-3/${mainWeaponSplId}`;
 export const subWeaponImageUrl = (subWeaponSplId: SubWeaponId) =>
 	`/static-assets/img/sub-weapons/${subWeaponSplId}`;
 export const specialWeaponImageUrl = (specialWeaponSplId: SpecialWeaponId) =>
@@ -502,8 +523,12 @@ export const modeImageUrl = (mode: ModeShortWithSpecial) =>
 	`/static-assets/img/modes/${mode}`;
 export const stageImageUrl = (stageId: StageId) =>
 	`/static-assets/img/stages/${stageId}`;
+export const stageBannerImageUrl = (stageId: StageId) =>
+	`/static-assets/img/stage-banners/${stageId}.avif`;
 export const tierImageUrl = (tier: TierName | "CALCULATING") =>
-	`/static-assets/img/tiers/${tier.toLowerCase()}`;
+	`/static-assets/img/tiers/${tier === "CALCULATING" ? "unranked" : tier.toLowerCase()}`;
+export const controllerImageUrl = (controller: string) =>
+	`/static-assets/img/controllers/${controller}.avif`;
 export const preferenceEmojiUrl = (preference?: Preference) => {
 	const emoji =
 		preference === "PREFER"
@@ -514,8 +539,6 @@ export const preferenceEmojiUrl = (preference?: Preference) => {
 
 	return `/static-assets/img/emoji/${emoji}.svg`;
 };
-export const tournamentLogoUrl = (identifier: string) =>
-	`/static-assets/img/tournament-logos/${identifier}.png`;
 export const TIER_PLUS_URL = "/static-assets/img/tiers/plus";
 
 export const winnersImageUrl = ({
@@ -557,3 +580,10 @@ export const mySlugify = (name: string) => {
 export const isCustomUrl = (value: string) => {
 	return Number.isNaN(Number(value));
 };
+
+export function vodUrl(vod: {
+	platformVideoId: string;
+	timestampSeconds: number;
+}) {
+	return `https://www.twitch.tv/videos/${vod.platformVideoId}?t=${vod.timestampSeconds}s`;
+}

@@ -1,6 +1,6 @@
-import type { MetaFunction } from "@remix-run/node";
-import { useLoaderData } from "@remix-run/react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { useLoaderData } from "react-router";
 import { TierImage } from "~/components/Image";
 import { Main } from "~/components/Main";
 import {
@@ -13,6 +13,7 @@ import { metaTags } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 
 import { loader } from "../loaders/tiers.server";
+
 export { loader };
 
 export const meta: MetaFunction = (args) => {

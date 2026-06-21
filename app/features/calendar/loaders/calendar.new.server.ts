@@ -1,26 +1,25 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
+import * as R from "remeda";
 import { requireUser } from "~/features/auth/core/user.server";
 import * as BadgeRepository from "~/features/badges/BadgeRepository.server";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
+import * as TournamentRepository from "~/features/tournament/TournamentRepository.server";
 import { tournamentData } from "~/features/tournament-bracket/core/Tournament.server";
 import * as TournamentOrganizationRepository from "~/features/tournament-organization/TournamentOrganizationRepository.server";
 import { requireRole } from "~/modules/permissions/guards.server";
 import { tournamentBracketsPage } from "~/utils/urls";
 import { canEditCalendarEvent } from "../calendar-utils";
 
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-	const user = await requireUser(request);
-	requireRole(user, "CALENDAR_EVENT_ADDER");
-
-	const url = new URL(request.url);
+export const loader = async ({ url }: LoaderFunctionArgs) => {
+	const user = requireUser();
+	requireRole("CALENDAR_EVENT_ADDER");
 
 	const eventWithTournament = async (key: string) => {
 		const eventId = Number(url.searchParams.get(key));
 		const event = Number.isNaN(eventId)
 			? undefined
-			: await CalendarRepository.findById({
-					id: eventId,
+			: await CalendarRepository.findById(eventId, {
 					includeMapPool: true,
 					includeTieBreakerMapPool: true,
 					includeBadgePrizes: true,
@@ -28,7 +27,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 		if (!event) return;
 
-		if (!event?.tournamentId) return { ...event, tournament: null };
+		if (!event?.tournamentId)
+			return { ...event, tournament: null, rules: null };
 
 		return {
 			...event,
@@ -36,6 +36,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 				tournamentId: event.tournamentId,
 				user,
 			}),
+			rules: await TournamentRepository.findRulesById(event.tournamentId),
 		};
 	};
 
@@ -63,28 +64,83 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 		);
 	}
 
+	const managedBadges = await BadgeRepository.findManagedByUserId(user.id);
+
+	const organizations = (
+		await findValidOrganizations(
+			user.id,
+			user.roles.includes("TOURNAMENT_ADDER"),
+		)
+	).concat(
+		eventToEdit?.tournament?.ctx.organization
+			? eventToEdit.tournament.ctx.organization
+			: [],
+	);
+
+	const canAddTournaments = organizations.length > 0;
+
+	const eventToCopyRaw =
+		canAddTournaments && !eventToEdit
+			? await eventWithTournament("copyEventId")
+			: undefined;
+
+	const eventToCopy = eventToCopyRaw
+		? {
+				...eventToCopyRaw,
+				badgePrizes: eventToCopyRaw.badgePrizes?.filter((badge) =>
+					managedBadges.some((mb) => mb.id === badge.id),
+				),
+			}
+		: undefined;
+
+	// the badges the user can pick from, plus any already-attached prize badges they no
+	// longer manage (so an existing selection still renders and stays removable)
+	const badgeOptions = R.uniqueBy(
+		[...managedBadges, ...(eventToEdit?.badgePrizes ?? [])].map((badge) => ({
+			id: badge.id,
+			code: badge.code,
+			displayName: badge.displayName,
+			hue: badge.hue,
+		})),
+		(badge) => badge.id,
+	);
+
 	return {
 		isAddingTournament: Boolean(
 			url.searchParams.has("tournament") ||
 				url.searchParams.has("copyEventId") ||
 				eventToEdit?.tournament,
 		),
-		managedBadges: await BadgeRepository.findManagedByUserId(user.id),
+		managedBadges,
+		badgeOptions,
 		eventToEdit: canEditEvent ? eventToEdit : undefined,
-		eventToCopy:
-			user.roles.includes("TOURNAMENT_ADDER") && !eventToEdit
-				? await eventWithTournament("copyEventId")
-				: undefined,
+		eventToCopy,
 		recentTournaments:
-			user.roles.includes("TOURNAMENT_ADDER") && !eventToEdit
+			canAddTournaments && !eventToEdit
 				? await CalendarRepository.findRecentTournamentsByAuthorId(user.id)
 				: undefined,
-		organizations: (
-			await TournamentOrganizationRepository.findByOrganizerUserId(user.id)
-		).concat(
-			eventToEdit?.tournament?.ctx.organization
-				? eventToEdit.tournament.ctx.organization
-				: [],
-		),
+		organizations,
 	};
 };
+
+export async function findValidOrganizations(
+	userId: number,
+	isTournamentAdder: boolean,
+) {
+	const orgs = await TournamentOrganizationRepository.findByUserId(userId, {
+		roles: ["ADMIN", "ORGANIZER"],
+	});
+
+	if (isTournamentAdder) {
+		return [
+			"NO_ORG",
+			...orgs.map((org) =>
+				R.omit(org, ["isEstablished", "role", "roleDisplayName"]),
+			),
+		];
+	}
+
+	return orgs
+		.filter((org) => org.isEstablished)
+		.map((org) => R.omit(org, ["isEstablished", "role", "roleDisplayName"]));
+}

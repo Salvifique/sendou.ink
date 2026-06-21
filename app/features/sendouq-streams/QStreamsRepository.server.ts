@@ -1,7 +1,7 @@
 import { jsonObjectFrom } from "kysely/helpers/sqlite";
 import { db } from "~/db/sql";
 import { dateToDatabaseTimestamp } from "~/utils/dates";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
+import { commonUserSelect } from "~/utils/kysely.server";
 import type { Unwrapped } from "~/utils/types";
 
 export type ActiveMatchPlayersItem = Unwrapped<typeof activeMatchPlayers>;
@@ -19,13 +19,17 @@ export function activeMatchPlayers() {
 			),
 		)
 		.innerJoin("GroupMember", "GroupMember.groupId", "Group.id")
+		.innerJoin("LiveStream", "LiveStream.userId", "GroupMember.userId")
 		.select(({ eb }) => [
 			"GroupMatch.id as groupMatchId",
 			"GroupMatch.createdAt as groupMatchCreatedAt",
+			"LiveStream.twitch as streamTwitch",
+			"LiveStream.viewerCount as streamViewerCount",
+			"LiveStream.thumbnailUrl as streamThumbnailUrl",
 			jsonObjectFrom(
 				eb
 					.selectFrom("User")
-					.select([...COMMON_USER_FIELDS, "User.twitch"])
+					.select((eb) => [...commonUserSelect(eb), "User.twitch"])
 					.whereRef("GroupMember.userId", "=", "User.id"),
 			).as("user"),
 		])

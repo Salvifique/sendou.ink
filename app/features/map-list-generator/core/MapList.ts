@@ -1,0 +1,448 @@
+import { err, ok } from "neverthrow";
+import * as R from "remeda";
+import { modesShort } from "~/modules/in-game-lists/modes";
+import type {
+	ModeShort,
+	ModeWithStage,
+	StageId,
+} from "~/modules/in-game-lists/types";
+import invariant from "~/utils/invariant";
+import type { MapPool } from "./map-pool";
+import type { ReadonlyMapPoolObject } from "./map-pool-serializer/types";
+
+interface GenerateNext {
+	/** How many maps to return? E.g. for a Bo5 set, amount should be 5 */
+	amount: number;
+	pattern?: string;
+}
+
+interface MaplistPattern {
+	mustInclude?: Array<{
+		mode: ModeShort;
+		/** Should the mode appear in the guaranteed to be played maps of a Best of set e.g. first 3 of a Bo5? */
+		isGuaranteed: boolean;
+	}>;
+	pattern: Array<"ANY" | ModeShort>;
+}
+
+/**
+ * Creates a unique key for a stage-mode combination.
+ * @example
+ * stageModeKey("SZ", 1); // "1-SZ"
+ */
+export function modeStageKey(mode: ModeShort, stageId: StageId): string {
+	return `${mode}-${stageId}`;
+}
+
+/**
+ * Generates map lists that avoid repeating stages and optionally allows providing mode pattern.
+ *
+ * @example
+ * const generator = generate({ mapPool: new MapPool(pool) });
+ * generator.next();
+ * const firstSet = generator.next({ amount: 5 }).value;
+ * const secondSet = generator.next({ amount: 3, pattern: "SZ*TC" }).value; // remembers stages used in firstSet
+ */
+export function* generate(args: {
+	/** The map pool to use for generating map lists (MapPool class) */
+	mapPool: MapPool;
+	/** Should the function bias in favor of maps not played? E.g. maps 4 & 5 in a Bo5 format (not every team plays them). Should be true if generating for tournament with best of format. */
+	considerGuaranteed?: boolean;
+	/** Initial weights for specific stage-mode combinations. Key format: `${mode}-${stageId}` (generate via `MapList.stageModeKey`). Negative weights can be used to deprioritize certain maps. */
+	initialWeights?: Map<string, number>;
+	/** Skip the ensureMinimumCandidates check that inflates weights to ensure half the pool is available. Useful when initial weights already define the desired selection. */
+	skipEnsureMinimumCandidates?: boolean;
+	/** Fixed mode order — when set, skips the random shuffle and uses only this order. Intended for `resume`. */
+	modeOrder?: ModeShort[];
+	/** Initial weights for stages (mode-agnostic). Used by `resume` to carry over stage-level penalties from history. */
+	initialStageWeights?: Map<StageId, number>;
+}): Generator<Array<ModeWithStage>, Array<ModeWithStage>, GenerateNext> {
+	if (args.mapPool.isEmpty()) {
+		while (true) yield [];
+	}
+
+	const modes = args.mapPool.modes;
+
+	const { stageWeights, stageModeWeights } = initializeWeights(
+		modes,
+		args.mapPool.parsed,
+		args.initialWeights,
+		args.initialStageWeights,
+	);
+	const modeOrder = args.modeOrder ?? R.shuffle(modes);
+	let modePosition = 0;
+
+	const firstArgs = yield [];
+	let amount = firstArgs.amount;
+	let pattern = firstArgs.pattern
+		? parsePattern(firstArgs.pattern).unwrapOr(null)
+		: null;
+
+	while (true) {
+		const result: ModeWithStage[] = [];
+
+		const { currentModeOrder, modesConsumed } = pattern
+			? modifyModeOrderByPattern(modeOrder, pattern, amount, modePosition)
+			: {
+					currentModeOrder: Array.from(
+						{ length: amount },
+						(_, i) => modeOrder[(modePosition + i) % modeOrder.length],
+					),
+					modesConsumed: amount,
+				};
+
+		if (!args.skipEnsureMinimumCandidates) {
+			ensureMinimumCandidates({
+				mapPool: args.mapPool,
+				stageWeights,
+				stageModeWeights,
+			});
+		}
+
+		for (let i = 0; i < amount; i++) {
+			const mode = currentModeOrder[i % currentModeOrder.length];
+			const possibleStages = args.mapPool.parsed[mode];
+			const isNotGuaranteedToBePlayed = args.considerGuaranteed
+				? Math.ceil(amount / 2) <= i
+				: false;
+
+			const stageId = selectStageWeighted({
+				possibleStages,
+				mode,
+				stageWeights,
+				stageModeWeights,
+			});
+
+			result.push({ mode, stageId });
+
+			for (const [key, value] of stageWeights.entries()) {
+				stageWeights.set(key, value + 1);
+			}
+			for (const [key, value] of stageModeWeights.entries()) {
+				stageModeWeights.set(key, value + 1);
+			}
+
+			const stageWeightPenalty = isNotGuaranteedToBePlayed
+				? -2
+				: -Math.max(5, amount);
+			const stageModeWeightPenalty = args.mapPool.modes.length > 1 ? -10 : 0;
+
+			stageWeights.set(stageId, stageWeightPenalty);
+			stageModeWeights.set(modeStageKey(mode, stageId), stageModeWeightPenalty);
+		}
+
+		modePosition += modesConsumed;
+		const nextArgs = yield result;
+		amount = nextArgs.amount;
+		pattern = nextArgs.pattern
+			? parsePattern(nextArgs.pattern).unwrapOr(null)
+			: null;
+	}
+}
+
+/**
+ * Returns a generator primed to continue map selection after the given history.
+ *
+ * Keeps the pool's mode order stable (rotated so the next-to-play mode is first)
+ * and biases against already-played `(mode, stage)` pairs so they are not picked
+ * again unless every option in that mode has already been played.
+ *
+ * @example
+ * const generator = resume({ mapPool, history });
+ * generator.next();
+ * const { mode, stageId } = generator.next({ amount: 1 }).value![0];
+ */
+export function resume(args: {
+	mapPool: MapPool;
+	history: Array<{ mode: ModeShort; stageId: StageId }>;
+}) {
+	const modes = args.mapPool.modes;
+	const lastMode = args.history.at(-1)?.mode;
+	const lastIdx = lastMode ? modes.indexOf(lastMode) : -1;
+	const offset = modes.length > 0 ? (lastIdx + 1) % modes.length : 0;
+	const modeOrder = [...modes.slice(offset), ...modes.slice(0, offset)];
+
+	const initialWeights = new Map<string, number>();
+	for (const pair of args.mapPool.stageModePairs) {
+		initialWeights.set(modeStageKey(pair.mode, pair.stageId), 0);
+	}
+	for (const { mode, stageId } of args.history) {
+		initialWeights.set(modeStageKey(mode, stageId), -100);
+	}
+
+	const STAGE_PENALTY = -20;
+	const initialStageWeights = new Map<StageId, number>();
+	for (const pair of args.mapPool.stageModePairs) {
+		if (!initialStageWeights.has(pair.stageId)) {
+			initialStageWeights.set(pair.stageId, 0);
+		}
+	}
+	for (const { stageId } of args.history) {
+		for (const [key, value] of initialStageWeights.entries()) {
+			initialStageWeights.set(key, value + 1);
+		}
+		initialStageWeights.set(stageId, STAGE_PENALTY);
+	}
+
+	return generate({
+		mapPool: args.mapPool,
+		modeOrder,
+		initialWeights: initialWeights.size > 0 ? initialWeights : undefined,
+		initialStageWeights,
+		skipEnsureMinimumCandidates: true,
+	});
+}
+
+function initializeWeights(
+	modes: ModeShort[],
+	mapPool: ReadonlyMapPoolObject,
+	initialWeights?: Map<string, number>,
+	initialStageWeights?: Map<StageId, number>,
+) {
+	const stageWeights = new Map<StageId, number>();
+	const stageModeWeights = new Map<string, number>();
+
+	const hasInitialWeights = initialWeights && initialWeights.size > 0;
+
+	for (const mode of modes) {
+		const stageIds = mapPool[mode];
+		for (const stageId of stageIds) {
+			stageWeights.set(stageId, initialStageWeights?.get(stageId) ?? 0);
+			const key = modeStageKey(mode, stageId);
+			const initialWeight =
+				initialWeights?.get(key) ?? (hasInitialWeights ? -1000 : 0);
+			stageModeWeights.set(key, initialWeight);
+		}
+	}
+
+	return { stageWeights, stageModeWeights };
+}
+
+function weightedRandomSelect<T>(
+	candidates: T[],
+	getWeight: (candidate: T) => number,
+): T {
+	const totalWeight = candidates.reduce(
+		(sum, candidate) => sum + Math.max(0, getWeight(candidate)),
+		0,
+	);
+
+	invariant(totalWeight > 0, "Expected at least one candidate with weight > 0");
+
+	let random = Math.random() * totalWeight;
+
+	for (const candidate of candidates) {
+		const weight = Math.max(0, getWeight(candidate));
+		random -= weight;
+		if (random <= 0) {
+			return candidate;
+		}
+	}
+
+	return candidates[candidates.length - 1];
+}
+
+function selectStageWeighted({
+	possibleStages,
+	mode,
+	stageWeights,
+	stageModeWeights,
+}: {
+	possibleStages: readonly StageId[];
+	mode: ModeShort;
+	stageWeights: Map<StageId, number>;
+	stageModeWeights: Map<string, number>;
+}): StageId {
+	const getCandidates = () =>
+		possibleStages.filter((stageId) => {
+			const stageWeight = stageWeights.get(stageId) ?? 0;
+			const stageModeWeight =
+				stageModeWeights.get(modeStageKey(mode, stageId)) ?? 0;
+			return stageWeight >= 0 && stageModeWeight >= 0;
+		});
+
+	let candidates = getCandidates();
+
+	while (candidates.length === 0) {
+		for (const [key, value] of stageWeights.entries()) {
+			stageWeights.set(key, value + 1);
+		}
+		for (const [key, value] of stageModeWeights.entries()) {
+			stageModeWeights.set(key, value + 1);
+		}
+		candidates = getCandidates();
+	}
+
+	return weightedRandomSelect(candidates, (stageId) => {
+		const stageWeight = stageWeights.get(stageId) ?? 0;
+		const stageModeWeight =
+			stageModeWeights.get(modeStageKey(mode, stageId)) ?? 0;
+		return stageWeight + stageModeWeight + 1;
+	});
+}
+
+/** Ensure that stage map pool has at least half the total options at the start of a round to avoid predictable replay order */
+function ensureMinimumCandidates({
+	mapPool,
+	stageWeights,
+	stageModeWeights,
+}: {
+	mapPool: MapPool;
+	stageWeights: Map<StageId, number>;
+	stageModeWeights: Map<string, number>;
+}) {
+	const countAvailableStages = () => {
+		return mapPool.stages.filter((stageId) => {
+			const stageWeight = stageWeights.get(stageId) ?? 0;
+			return stageWeight >= 0;
+		}).length;
+	};
+
+	const requiredCandidates = Math.ceil(mapPool.stages.length / 2);
+
+	while (countAvailableStages() < requiredCandidates) {
+		for (const [key, value] of stageWeights.entries()) {
+			stageWeights.set(key, value + 1);
+		}
+		for (const [key, value] of stageModeWeights.entries()) {
+			stageModeWeights.set(key, value + 1);
+		}
+	}
+}
+
+function modifyModeOrderByPattern(
+	modeOrder: ModeShort[],
+	pattern: MaplistPattern,
+	amount: number,
+	offset: number,
+) {
+	const filteredModes = modeOrder.filter(
+		(mode) => !pattern.pattern.includes(mode),
+	);
+	const modesToUse = filteredModes.length > 0 ? filteredModes : modeOrder;
+
+	const expandedPattern = Array.from(
+		{ length: amount },
+		(_, i) => pattern.pattern[i % pattern.pattern.length],
+	);
+
+	// slots fixed by the pattern don't consume modes from the cycle, otherwise
+	// the same cycle positions would resolve every set and modes get starved
+	const result: ModeShort[] = [];
+	let modesConsumed = 0;
+	for (const part of expandedPattern) {
+		if (part !== undefined && part !== "ANY" && modeOrder.includes(part)) {
+			result.push(part);
+			continue;
+		}
+
+		result.push(modesToUse[(offset + modesConsumed) % modesToUse.length]);
+		modesConsumed++;
+	}
+
+	if (pattern.mustInclude) {
+		for (const { mode, isGuaranteed } of pattern.mustInclude) {
+			// impossible must include, mode is not in the pool
+			if (!modeOrder.includes(mode)) continue;
+
+			let possibleIndices = expandedPattern.every((part) => part !== "ANY")
+				? // inflexible pattern fallback
+					expandedPattern.map((_, idx) => idx)
+				: expandedPattern.flatMap((part, idx) => (part === "ANY" ? [idx] : []));
+
+			if (isGuaranteed) {
+				const guaranteedPositions = Math.ceil(amount / 2);
+				possibleIndices = possibleIndices.filter(
+					(idx) => idx < guaranteedPositions,
+				);
+			}
+
+			const isAlreadyIncluded = result.includes(mode);
+			// "good spot" means a spot where the pattern allows ANY mode
+			const isInGoodSpot = possibleIndices.includes(result.indexOf(mode));
+
+			if (!isAlreadyIncluded) {
+				const randomIndex = R.sample(possibleIndices, 1)[0];
+				invariant(typeof randomIndex === "number");
+				result[randomIndex] = mode;
+			} else if (!isInGoodSpot) {
+				const currentIndex = result.indexOf(mode);
+				const targetIndex = R.sample(
+					possibleIndices.filter((idx) => idx !== currentIndex),
+					1,
+				)[0];
+				invariant(typeof targetIndex === "number");
+
+				[result[currentIndex], result[targetIndex]] = [
+					result[targetIndex],
+					result[currentIndex],
+				];
+			}
+		}
+	}
+
+	if (pattern.pattern.every((part) => part === "ANY")) {
+		return { currentModeOrder: result, modesConsumed };
+	}
+
+	for (const [idx, mode] of expandedPattern.entries()) {
+		if (mode === "ANY") continue;
+
+		if (modeOrder.includes(mode)) {
+			result[idx] = mode;
+		}
+	}
+
+	return { currentModeOrder: result, modesConsumed };
+}
+
+const validPatternParts = new Set(["*", ...modesShort] as const);
+
+/**
+ * Parses a pattern string into structured pattern data for map list generation.
+ *
+ * @example
+ * parsePattern("SZ*TC").unwrapOr(null); // { pattern: ["SZ", "ANY", "TC"] }
+ * parsePattern("[RM!]*SZ").unwrapOr(null); // { pattern: ["ANY", "SZ"], mustInclude: [{ mode: "RM", isGuaranteed: true }] }
+ */
+export function parsePattern(pattern: string) {
+	if (pattern.length > 50) {
+		return err("pattern too long");
+	}
+
+	const mustInclude: Array<{ mode: ModeShort; isGuaranteed: boolean }> = [];
+	let mutablePattern = pattern;
+	for (const mode of modesShort) {
+		if (mutablePattern.includes(`[${mode}!]`)) {
+			mustInclude.push({ mode, isGuaranteed: true });
+			mutablePattern = mutablePattern.replaceAll(`[${mode}!]`, "");
+		} else if (mutablePattern.includes(`[${mode}]`)) {
+			mustInclude.push({ mode, isGuaranteed: false });
+			mutablePattern = mutablePattern.replaceAll(`[${mode}]`, "");
+		}
+	}
+
+	for (const part of validPatternParts) {
+		mutablePattern = mutablePattern.replaceAll(part, `${part},`);
+	}
+
+	const parts = mutablePattern
+		.split(",")
+		.map((part) => part.trim())
+		.filter((part) => part.length > 0);
+
+	if (parts.some((part) => !validPatternParts.has(part as ModeShort | "*"))) {
+		return err("invalid mode in pattern");
+	}
+
+	if (parts.length > 0 && parts[0] === "*" && parts.at(-1) === "*") {
+		parts.pop();
+	}
+
+	return ok({
+		pattern: parts.map((part) =>
+			modesShort.includes(part as ModeShort) ? (part as ModeShort) : "ANY",
+		),
+		mustInclude: mustInclude.length > 0 ? mustInclude : undefined,
+	});
+}

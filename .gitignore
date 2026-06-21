@@ -1,8 +1,10 @@
 node_modules
+package-lock.json
 
 /.cache*
 /build
 /public/build
+.react-router/
 .env
 translation-progress.md
 
@@ -10,6 +12,7 @@ notes.md
 
 db*.sqlite3*
 !db-test.sqlite3
+!e2e/seeds/*.sqlite3
 dump
 
 .DS_Store
@@ -18,9 +21,17 @@ dump
 /scripts/output/*
 !/scripts/output/.gitkeep
 
-/scripts/dicts/**/*.json
+/scripts/dicts/**/*
+/scripts/badge
 /test-results/
 /playwright-report/
 /playwright/.cache/
+/.vitest-attachments
+.vitest-attachments/
+
+# Vitest auto-captured failure screenshots (numbered, without browser info)
+# Real baselines have pattern: *-chromium-darwin.png
+**/__screenshots__/**/*-[0-9].png
+.e2e-minio-started
 
 notepad.txt

@@ -4,9 +4,12 @@ import type { LUTI_DIVS } from "./scrims-constants";
 
 export type LutiDiv = (typeof LUTI_DIVS)[number];
 
+export type ScrimSide = "ALPHA" | "BRAVO";
+
 export interface ScrimPost {
 	id: number;
 	at: number;
+	rangeEnd: number | null;
 	createdAt: number;
 	visibility: AssociationVisibility | null;
 	text: string | null;
@@ -15,6 +18,12 @@ export interface ScrimPost {
 		max: LutiDiv;
 		/** Min div in the whole system is "11" */
 		min: LutiDiv;
+	} | null;
+	maps: "SZ" | "ALL" | "RANKED" | null;
+	mapsTournament: {
+		id: number;
+		name: string;
+		avatarUrl: string;
 	} | null;
 	team: ScrimPostTeam | null;
 	users: Array<ScrimPostUser>;
@@ -26,6 +35,7 @@ export interface ScrimPost {
 		MANAGE_REQUESTS: number[];
 		DELETE_POST: number[];
 		CANCEL: number[];
+		MANAGE_TRACKING: number[];
 	};
 	managedByAnyone: boolean;
 	/** When the post was made was it scheduled for a future time slot (as opposed to looking now) */
@@ -42,6 +52,8 @@ export interface ScrimPostRequest {
 	isAccepted: boolean;
 	users: Array<ScrimPostUser>;
 	team: ScrimPostTeam | null;
+	message: string | null;
+	at: number | null;
 	permissions: {
 		CANCEL: number[];
 	};
@@ -50,10 +62,25 @@ export interface ScrimPostRequest {
 
 export interface ScrimPostUser extends CommonUser {
 	isOwner: boolean;
+	inGameName: string | null;
 }
 
 interface ScrimPostTeam {
 	name: string;
 	customUrl: string;
 	avatarUrl: string | null;
+}
+
+export interface TimeRange {
+	start: string;
+	end: string;
+}
+
+export interface ScrimFilters {
+	weekdayTimes: TimeRange | null;
+	weekendTimes: TimeRange | null;
+	divs: {
+		min: LutiDiv | null;
+		max: LutiDiv | null;
+	} | null;
 }

@@ -1,7 +1,9 @@
+import { sub } from "date-fns";
 import type {
 	Expression,
 	ExpressionBuilder,
 	NotNull,
+	SqlBool,
 	Transaction,
 } from "kysely";
 import { sql } from "kysely";
@@ -16,6 +18,7 @@ import type {
 } from "~/db/tables";
 import { EXCLUDED_TAGS } from "~/features/calendar/calendar-constants";
 import * as Progression from "~/features/tournament-bracket/core/Progression";
+import { getTentativeTier } from "~/features/tournament-organization/core/tentativeTiers.server";
 import {
 	databaseTimestampNow,
 	databaseTimestampToDate,
@@ -23,8 +26,11 @@ import {
 	dateToDatabaseTimestamp,
 } from "~/utils/dates";
 import invariant from "~/utils/invariant";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
-import type { Unwrapped } from "~/utils/types";
+import {
+	concatUserSubmittedImagePrefix,
+	customAvatarUrl,
+	tournamentLogoWithDefault,
+} from "~/utils/kysely.server";
 import { calendarEventPage, tournamentPage } from "~/utils/urls";
 import {
 	modesIncluded,
@@ -34,15 +40,20 @@ import {
 import type { CalendarEvent } from "./calendar-types";
 import { calendarEventSorter } from "./calendar-utils";
 
-// TODO: convert from raw to using the "exists" function
-const hasBadge = sql<number> /* sql */`exists (
-  select
-    1
-  from
-    "CalendarEventBadge"
-  where
-    "CalendarEventBadge"."eventId" = "CalendarEventDate"."eventId"
-)`.as("hasBadge");
+function hasBadge(eb: ExpressionBuilder<DB, "CalendarEventDate">) {
+	return eb
+		.exists(
+			eb
+				.selectFrom("CalendarEventBadge")
+				.select("CalendarEventBadge.eventId")
+				.whereRef(
+					"CalendarEventBadge.eventId",
+					"=",
+					"CalendarEventDate.eventId",
+				),
+		)
+		.as("hasBadge");
+}
 
 const withMapPool = (eb: ExpressionBuilder<DB, "CalendarEvent">) => {
 	return jsonArrayFrom(
@@ -85,11 +96,14 @@ function tournamentOrganization(organizationId: Expression<number | null>) {
 				"TournamentOrganization.avatarImgId",
 				"UserSubmittedImage.id",
 			)
-			.select([
+			.select((eb) => [
 				"TournamentOrganization.id",
 				"TournamentOrganization.name",
 				"TournamentOrganization.slug",
-				"UserSubmittedImage.url as avatarUrl",
+				"TournamentOrganization.isEstablished",
+				concatUserSubmittedImagePrefix(eb.ref("UserSubmittedImage.url")).as(
+					"logoUrl",
+				),
 			])
 			.whereRef("TournamentOrganization.id", "=", organizationId),
 	);
@@ -134,6 +148,7 @@ const withTeamsCount = (
 				),
 		)
 		.whereRef("TournamentTeam.tournamentId", "=", "Tournament.id")
+		.where("TournamentTeam.isPlaceholder", "=", 0)
 		.where((eb) =>
 			eb.or([
 				eb("TournamentTeamCheckIn.checkedInAt", "is not", null),
@@ -141,12 +156,6 @@ const withTeamsCount = (
 			]),
 		)
 		.select(({ fn }) => [fn.countAll<number>().as("teamsCount")]);
-
-const withLogoUrl = (eb: ExpressionBuilder<DB, "CalendarEvent">) =>
-	eb
-		.selectFrom("UserSubmittedImage")
-		.select(["UserSubmittedImage.url"])
-		.whereRef("CalendarEvent.avatarImgId", "=", "UserSubmittedImage.id");
 
 function findAllBetweenTwoTimestampsQuery({
 	startTime,
@@ -163,9 +172,11 @@ function findAllBetweenTwoTimestampsQuery({
 		.select((eb) => [
 			"CalendarEvent.id as eventId",
 			"CalendarEvent.authorId",
+			"CalendarEvent.organizationId",
 			"Tournament.id as tournamentId",
 			"Tournament.settings as tournamentSettings",
 			"Tournament.mapPickingStyle",
+			"Tournament.tier",
 			"CalendarEvent.name",
 			"CalendarEvent.tags",
 			"CalendarEventDate.startTime",
@@ -175,7 +186,7 @@ function findAllBetweenTwoTimestampsQuery({
 			),
 			withOrganization(eb).as("organization"),
 			withTeamsCount(eb).as("teamsCount"),
-			withLogoUrl(eb).as("logoUrl"),
+			tournamentLogoWithDefault(eb).as("logoUrl"),
 			jsonArrayFrom(
 				eb
 					.selectFrom("MapPoolMap")
@@ -222,6 +233,16 @@ function findAllBetweenTwoTimestampsMapped(
 				? (row.tags.split(",") as CalendarEvent["tags"])
 				: [];
 
+			const isPastEvent =
+				databaseTimestampToDate(row.startTime) < sub(new Date(), { days: 1 });
+			const tentativeTier =
+				row.tier === null &&
+				row.organizationId !== null &&
+				row.tournamentId !== null &&
+				!isPastEvent
+					? getTentativeTier(row.organizationId, row.name)
+					: null;
+
 			return {
 				at: databaseTimestampToJavascriptTimestamp(row.startTime),
 				type: "calendar",
@@ -256,6 +277,8 @@ function findAllBetweenTwoTimestampsMapped(
 							isTest: row.tournamentSettings.isTest ?? false,
 						})
 					: null,
+				tier: row.tier ?? null,
+				tentativeTier,
 			};
 		},
 	);
@@ -271,83 +294,18 @@ function findAllBetweenTwoTimestampsMapped(
 	return dates;
 }
 
-export type ForShowcase = Unwrapped<typeof forShowcase>;
-
-export function forShowcase() {
-	return db
-		.selectFrom("Tournament")
-		.innerJoin("CalendarEvent", "Tournament.id", "CalendarEvent.tournamentId")
-		.innerJoin(
-			"CalendarEventDate",
-			"CalendarEvent.id",
-			"CalendarEventDate.eventId",
-		)
-		.select((eb) => [
-			"Tournament.id",
-			"Tournament.settings",
-			"CalendarEvent.authorId",
-			"CalendarEvent.name",
-			"CalendarEventDate.startTime",
-			withTeamsCount(eb).as("teamsCount"),
-			withLogoUrl(eb).as("logoUrl"),
-			withOrganization(eb).as("organization"),
-			jsonArrayFrom(
-				eb
-					.selectFrom("TournamentResult")
-					.innerJoin("User", "TournamentResult.userId", "User.id")
-					.innerJoin(
-						"TournamentTeam",
-						"TournamentResult.tournamentTeamId",
-						"TournamentTeam.id",
-					)
-					.leftJoin("AllTeam", "TournamentTeam.teamId", "AllTeam.id")
-					.leftJoin(
-						"UserSubmittedImage as TeamAvatar",
-						"AllTeam.avatarImgId",
-						"TeamAvatar.id",
-					)
-					.leftJoin(
-						"UserSubmittedImage as TournamentTeamAvatar",
-						"TournamentTeam.avatarImgId",
-						"TournamentTeamAvatar.id",
-					)
-					.whereRef("TournamentResult.tournamentId", "=", "Tournament.id")
-					.where("TournamentResult.placement", "=", 1)
-					.select([
-						...COMMON_USER_FIELDS,
-						"User.country",
-						"TournamentTeam.name as teamName",
-						"TeamAvatar.url as teamLogoUrl",
-						"TournamentTeamAvatar.url as pickupAvatarUrl",
-					]),
-			).as("firstPlacers"),
-		])
-		.where("CalendarEvent.hidden", "=", 0)
-		.where("CalendarEventDate.startTime", ">", databaseTimestampWeekAgo())
-		.orderBy("CalendarEventDate.startTime", "asc")
-		.$narrowType<{ teamsCount: NotNull }>()
-		.execute();
-}
-
-function databaseTimestampWeekAgo() {
-	const now = new Date();
-
-	now.setDate(now.getDate() - 7);
-
-	return dateToDatabaseTimestamp(now);
-}
-
-export async function findById({
-	id,
-	includeMapPool = false,
-	includeTieBreakerMapPool = false,
-	includeBadgePrizes = false,
-}: {
-	id: number;
-	includeMapPool?: boolean;
-	includeTieBreakerMapPool?: boolean;
-	includeBadgePrizes?: boolean;
-}) {
+export async function findById(
+	id: number,
+	{
+		includeMapPool = false,
+		includeTieBreakerMapPool = false,
+		includeBadgePrizes = false,
+	}: {
+		includeMapPool?: boolean;
+		includeTieBreakerMapPool?: boolean;
+		includeBadgePrizes?: boolean;
+	} = {},
+) {
 	const [firstRow, ...rest] = await db
 		.selectFrom("CalendarEvent")
 		.$if(includeMapPool, (qb) => qb.select(withMapPool))
@@ -360,7 +318,7 @@ export async function findById({
 		)
 		.innerJoin("User", "CalendarEvent.authorId", "User.id")
 		.leftJoin("Tournament", "CalendarEvent.tournamentId", "Tournament.id")
-		.select(({ ref }) => [
+		.select((eb) => [
 			"CalendarEvent.name",
 			"CalendarEvent.description",
 			"CalendarEvent.discordInviteCode",
@@ -377,8 +335,8 @@ export async function findById({
 			"User.username",
 			"User.discordId",
 			"User.discordAvatar",
-			hasBadge,
-			tournamentOrganization(ref("CalendarEvent.organizationId")).as(
+			hasBadge(eb),
+			tournamentOrganization(eb.ref("CalendarEvent.organizationId")).as(
 				"organization",
 			),
 		])
@@ -417,7 +375,7 @@ export async function findRecentTournamentsByAuthorId(authorId: number) {
 }
 
 function tagsArray(args: {
-	hasBadge: number;
+	hasBadge: SqlBool;
 	tags?: Tables["CalendarEvent"]["tags"];
 	tournamentId: Tables["CalendarEvent"]["tournamentId"];
 }) {
@@ -439,13 +397,14 @@ export async function findResultsByEventId(eventId: number) {
 				eb
 					.selectFrom("CalendarEventResultPlayer")
 					.leftJoin("User", "User.id", "CalendarEventResultPlayer.userId")
-					.select([
+					.select((eb) => [
 						"CalendarEventResultPlayer.userId as id",
 						"CalendarEventResultPlayer.name",
 						"User.username",
 						"User.discordId",
 						"User.discordAvatar",
 						"User.customUrl",
+						customAvatarUrl(eb).as("customAvatarUrl"),
 					])
 					.whereRef(
 						"CalendarEventResultPlayer.teamId",
@@ -476,13 +435,15 @@ type CreateArgs = Pick<
 	mapPickingStyle: Tables["Tournament"]["mapPickingStyle"];
 	bracketProgression: TournamentSettings["bracketProgression"] | null;
 	minMembersPerTeam?: number;
+	maxMembersPerTeam?: number;
 	teamsPerGroup?: number;
 	thirdPlaceMatch?: boolean;
 	requireInGameNames?: boolean;
+	requireSendouQParticipation?: boolean;
 	isRanked?: boolean;
 	isTest?: boolean;
+	isDraft?: boolean;
 	isInvitational?: boolean;
-	deadlines: TournamentSettings["deadlines"];
 	enableNoScreenToggle?: boolean;
 	enableSubs?: boolean;
 	autonomousSubs?: boolean;
@@ -516,14 +477,16 @@ export async function create(args: CreateArgs) {
 				thirdPlaceMatch: args.thirdPlaceMatch,
 				isRanked: args.isRanked,
 				isTest: args.isTest,
-				deadlines: args.deadlines,
+				isDraft: args.isDraft,
 				isInvitational: args.isInvitational,
 				enableNoScreenToggle: args.enableNoScreenToggle,
 				enableSubs: args.enableSubs,
 				autonomousSubs: args.autonomousSubs,
 				regClosesAt: args.regClosesAt,
 				requireInGameNames: args.requireInGameNames,
+				requireSendouQParticipation: args.requireSendouQParticipation,
 				minMembersPerTeam: args.minMembersPerTeam,
+				maxMembersPerTeam: args.maxMembersPerTeam,
 				swiss:
 					args.swissGroupCount && args.swissRoundCount
 						? {
@@ -565,7 +528,6 @@ export async function create(args: CreateArgs) {
 			? await createSubmittedImageInTrx({
 					trx,
 					avatarFileName: args.avatarFileName,
-					autoValidateAvatar: args.autoValidateAvatar,
 					userId: args.authorId,
 				})
 			: null;
@@ -581,7 +543,7 @@ export async function create(args: CreateArgs) {
 				bracketUrl: args.bracketUrl,
 				avatarImgId: args.avatarImgId ?? avatarImgId,
 				organizationId: args.organizationId,
-				hidden: args.parentTournamentId || args.isTest ? 1 : 0,
+				hidden: args.parentTournamentId || args.isTest || args.isDraft ? 1 : 0,
 				tournamentId,
 			})
 			.returning("id")
@@ -606,20 +568,18 @@ export async function create(args: CreateArgs) {
 
 async function createSubmittedImageInTrx({
 	trx,
-	autoValidateAvatar,
 	avatarFileName,
 	userId,
 }: {
 	trx: Transaction<DB>;
 	avatarFileName: string;
-	autoValidateAvatar?: boolean;
 	userId: number;
 }) {
 	const result = await trx
 		.insertInto("UnvalidatedUserSubmittedImage")
 		.values({
 			url: avatarFileName,
-			validatedAt: autoValidateAvatar ? databaseTimestampNow() : null,
+			validatedAt: databaseTimestampNow(),
 			submitterUserId: userId,
 		})
 		.returning("id")
@@ -640,7 +600,6 @@ export async function update(args: UpdateArgs) {
 			? await createSubmittedImageInTrx({
 					trx,
 					avatarFileName: args.avatarFileName,
-					autoValidateAvatar: args.autoValidateAvatar,
 					userId: args.authorId,
 				})
 			: null;
@@ -663,6 +622,22 @@ export async function update(args: UpdateArgs) {
 		const mapPickingStyle = tournamentId
 			? await updateTournamentTables(args, trx, tournamentId)
 			: null;
+
+		if (tournamentId) {
+			const { parentTournamentId, settings: existingSettings } = await trx
+				.selectFrom("Tournament")
+				.select(["parentTournamentId", "settings"])
+				.where("id", "=", tournamentId)
+				.executeTakeFirstOrThrow();
+
+			const hidden =
+				existingSettings.isTest || parentTournamentId || args.isDraft ? 1 : 0;
+			await trx
+				.updateTable("CalendarEvent")
+				.set({ hidden })
+				.where("id", "=", args.eventId)
+				.execute();
+		}
 
 		await trx
 			.deleteFrom("CalendarEventDate")
@@ -716,14 +691,16 @@ async function updateTournamentTables(
 		thirdPlaceMatch: args.thirdPlaceMatch,
 		isRanked: args.isRanked,
 		isTest: existingSettings.isTest, // this one is not editable after creation
-		deadlines: args.deadlines,
+		isDraft: args.isDraft,
 		isInvitational: args.isInvitational,
 		enableNoScreenToggle: args.enableNoScreenToggle,
 		enableSubs: args.enableSubs,
 		autonomousSubs: args.autonomousSubs,
 		regClosesAt: args.regClosesAt,
 		requireInGameNames: args.requireInGameNames,
+		requireSendouQParticipation: args.requireSendouQParticipation,
 		minMembersPerTeam: args.minMembersPerTeam,
+		maxMembersPerTeam: args.maxMembersPerTeam,
 		swiss:
 			args.swissGroupCount && args.swissRoundCount
 				? {

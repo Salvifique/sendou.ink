@@ -4,17 +4,23 @@ import type { TierName } from "~/features/mmr/mmr-constants";
 import type {
 	MainWeaponId,
 	ModeShortWithSpecial,
+	SpecialWeaponId,
 	StageId,
+	SubWeaponId,
 } from "~/modules/in-game-lists/types";
 import {
 	mainWeaponImageUrl,
 	modeImageUrl,
 	outlinedFiveStarMainWeaponImageUrl,
 	outlinedMainWeaponImageUrl,
+	outlinedTenStarMainWeaponImageUrl,
+	specialWeaponImageUrl,
 	stageImageUrl,
+	subWeaponImageUrl,
 	TIER_PLUS_URL,
 	tierImageUrl,
 } from "~/utils/urls";
+import styles from "./Image.module.css";
 
 interface ImageProps {
 	path: string;
@@ -49,22 +55,15 @@ export function Image({
 }: ImageProps) {
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: Biome v2 migration
-		<picture
+		<div
 			title={title}
 			className={containerClassName}
 			style={containerStyle}
 			onClick={onClick}
 		>
-			<source
-				type="image/avif"
-				srcSet={`${path}.avif`}
-				width={width}
-				height={height}
-				style={style}
-			/>
 			<img
 				alt={alt}
-				src={`${path}.png`}
+				src={`${path}.avif`}
 				className={className}
 				width={size ?? width}
 				height={size ?? height}
@@ -73,23 +72,42 @@ export function Image({
 				loading={loading}
 				data-testid={testId}
 			/>
-		</picture>
+		</div>
 	);
 }
 
-type WeaponImageProps = {
+type WeaponWithStars = {
 	weaponSplId: MainWeaponId;
-	variant: "badge" | "badge-5-star" | "build";
+	isFavorite?: boolean | number;
+	isTenStar?: boolean | number;
+};
+
+type WeaponImageProps = (
+	| { weaponSplId: MainWeaponId; weapon?: never }
+	| { weapon: WeaponWithStars; weaponSplId?: never }
+) & {
+	variant?: "badge" | "badge-5-star" | "badge-10-star" | "build";
 } & Omit<ImageProps, "path" | "alt">;
 
+function resolveWeaponBadgeVariant(weapon: WeaponWithStars) {
+	if (weapon.isFavorite && weapon.isTenStar) return "badge-10-star" as const;
+	if (weapon.isFavorite) return "badge-5-star" as const;
+	return "badge" as const;
+}
+
 export function WeaponImage({
-	weaponSplId,
-	variant,
+	weaponSplId: weaponSplIdProp,
+	weapon,
+	variant: variantProp,
 	testId,
 	title,
 	...rest
 }: WeaponImageProps) {
 	const { t } = useTranslation(["weapons"]);
+
+	const weaponSplId = weapon?.weaponSplId ?? weaponSplIdProp!;
+	const variant =
+		variantProp ?? (weapon ? resolveWeaponBadgeVariant(weapon) : "badge");
 
 	return (
 		<Image
@@ -102,7 +120,9 @@ export function WeaponImage({
 					? outlinedMainWeaponImageUrl(weaponSplId)
 					: variant === "badge-5-star"
 						? outlinedFiveStarMainWeaponImageUrl(weaponSplId)
-						: mainWeaponImageUrl(weaponSplId)
+						: variant === "badge-10-star"
+							? outlinedTenStarMainWeaponImageUrl(weaponSplId)
+							: mainWeaponImageUrl(weaponSplId)
 			}
 		/>
 	);
@@ -145,6 +165,50 @@ export function StageImage({ stageId, testId, ...rest }: StageImageProps) {
 	);
 }
 
+type SubWeaponImageProps = {
+	subWeaponId: SubWeaponId;
+} & Omit<ImageProps, "path" | "alt" | "title">;
+
+export function SubWeaponImage({
+	subWeaponId,
+	testId,
+	...rest
+}: SubWeaponImageProps) {
+	const { t } = useTranslation(["weapons"]);
+
+	return (
+		<Image
+			{...rest}
+			alt={t(`weapons:SUB_${subWeaponId}`)}
+			title={t(`weapons:SUB_${subWeaponId}`)}
+			testId={testId}
+			path={subWeaponImageUrl(subWeaponId)}
+		/>
+	);
+}
+
+type SpecialWeaponImageProps = {
+	specialWeaponId: SpecialWeaponId;
+} & Omit<ImageProps, "path" | "alt" | "title">;
+
+export function SpecialWeaponImage({
+	specialWeaponId,
+	testId,
+	...rest
+}: SpecialWeaponImageProps) {
+	const { t } = useTranslation(["weapons"]);
+
+	return (
+		<Image
+			{...rest}
+			alt={t(`weapons:SPECIAL_${specialWeaponId}`)}
+			title={t(`weapons:SPECIAL_${specialWeaponId}`)}
+			testId={testId}
+			path={specialWeaponImageUrl(specialWeaponId)}
+		/>
+	);
+}
+
 type TierImageProps = {
 	tier: { name: TierName; isPlus: boolean };
 } & Omit<ImageProps, "path" | "alt" | "title" | "size" | "height">;
@@ -155,14 +219,14 @@ export function TierImage({ tier, className, width = 200 }: TierImageProps) {
 	const height = width * 0.8675;
 
 	return (
-		<div className={clsx("tier__container", className)} style={{ width }}>
+		<div className={clsx(styles.tierContainer, className)} style={{ width }}>
 			<Image
 				path={tierImageUrl(tier.name)}
 				width={width}
 				height={height}
 				alt={title}
 				title={title}
-				containerClassName="tier__img"
+				containerClassName={styles.tierImg}
 			/>
 			{tier.isPlus ? (
 				<Image
@@ -171,7 +235,7 @@ export function TierImage({ tier, className, width = 200 }: TierImageProps) {
 					height={height}
 					alt={title}
 					title={title}
-					containerClassName="tier__img"
+					containerClassName={styles.tierImg}
 				/>
 			) : null}
 		</div>

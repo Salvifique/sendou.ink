@@ -1,9 +1,13 @@
-import { Link } from "@remix-run/react";
+import { Users } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { Avatar } from "~/components/Avatar";
+import { SendouButton } from "~/components/elements/Button";
+import { SendouPopover } from "~/components/elements/Popover";
+import { LocaleTime } from "~/components/LocaleTime";
 import { Placement } from "~/components/Placement";
 import { Table } from "~/components/Table";
-import { databaseTimestampToDate } from "~/utils/dates";
+import { TierPill } from "~/components/TierPill";
 import {
 	calendarEventPage,
 	tournamentBracketsPage,
@@ -11,22 +15,25 @@ import {
 	userPage,
 } from "~/utils/urls";
 import type { UserResultsLoaderData } from "../loaders/u.$identifier.results.server";
+import styles from "../user-page.module.css";
+import {
+	HIGHLIGHT_CHECKBOX_NAME,
+	HIGHLIGHT_TOURNAMENT_CHECKBOX_NAME,
+} from "../user-page-constants";
+import { ParticipationPill } from "./ParticipationPill";
 
 export type UserResultsTableProps = {
-	results: UserResultsLoaderData["results"];
+	results: UserResultsLoaderData["results"]["value"];
 	id: string;
 	hasHighlightCheckboxes?: boolean;
 };
-
-export const HIGHLIGHT_CHECKBOX_NAME = "highlightTeamIds";
-export const HIGHLIGHT_TOURNAMENT_CHECKBOX_NAME = "highlightTournamentTeamIds";
 
 export function UserResultsTable({
 	results,
 	id,
 	hasHighlightCheckboxes,
 }: UserResultsTableProps) {
-	const { t, i18n } = useTranslation("user");
+	const { t } = useTranslation("user");
 
 	const placementHeaderId = `${id}-th-placement`;
 
@@ -36,10 +43,10 @@ export function UserResultsTable({
 				<tr>
 					{hasHighlightCheckboxes && <th />}
 					<th id={placementHeaderId}>{t("results.placing")}</th>
-					<th>{t("results.team")}</th>
 					<th>{t("results.tournament")}</th>
 					<th>{t("results.date")}</th>
-					<th>{t("results.mates")}</th>
+					<th>{t("results.participation")}</th>
+					<th>{t("results.team")}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -77,72 +84,103 @@ export function UserResultsTable({
 									</div>
 								</div>
 							</td>
-							<td>
-								{result.tournamentId ? (
-									<Link
-										to={tournamentTeamPage({
-											tournamentId: result.tournamentId,
-											tournamentTeamId: result.teamId,
-										})}
-									>
-										{result.teamName}
-									</Link>
-								) : (
-									result.teamName
-								)}
+							<td id={nameCellId} className="whitespace-nowrap">
+								<div className="stack horizontal xs items-center">
+									{result.eventId ? (
+										<Link to={calendarEventPage(result.eventId)}>
+											{result.eventName}
+										</Link>
+									) : null}
+									{result.tournamentId ? (
+										<>
+											{result.logoUrl ? (
+												<img
+													src={result.logoUrl}
+													alt=""
+													width={24}
+													height={24}
+													className="rounded-full"
+												/>
+											) : null}
+											{result.tier ? <TierPill tier={result.tier} /> : null}
+											<Link
+												to={tournamentBracketsPage({
+													tournamentId: result.tournamentId,
+												})}
+												data-testid="tournament-name-cell"
+											>
+												{result.eventName}
+											</Link>
+											{result.div ? (
+												<span className="text-lighter">({result.div})</span>
+											) : null}
+										</>
+									) : null}
+								</div>
 							</td>
-							<td id={nameCellId}>
-								{result.eventId ? (
-									<Link to={calendarEventPage(result.eventId)}>
-										{result.eventName}
-									</Link>
-								) : null}
-								{result.tournamentId ? (
-									<Link
-										to={tournamentBracketsPage({
-											tournamentId: result.tournamentId,
-										})}
-										data-testid="tournament-name-cell"
-									>
-										{result.eventName}
-									</Link>
-								) : null}
-							</td>
-							<td>
-								{databaseTimestampToDate(result.startTime).toLocaleDateString(
-									i18n.language,
-									{
+							<td className="whitespace-nowrap">
+								<LocaleTime
+									date={result.startTime}
+									options={{
 										day: "numeric",
-										month: "long",
-										year: "numeric",
-									},
-								)}
+										month: "numeric",
+										year: "2-digit",
+									}}
+								/>
 							</td>
 							<td>
-								<ul
-									className="u__results-players"
-									data-testid={`mates-cell-placement-${i}`}
-								>
-									{result.mates.map((player) => (
-										<li
-											key={player.name ? player.name : player.id}
-											className="flex items-center"
+								<ParticipationPill setResults={result.setResults} />
+							</td>
+							<td className="whitespace-nowrap">
+								<div className="stack horizontal md items-center">
+									<SendouPopover
+										trigger={
+											<SendouButton
+												icon={<Users />}
+												size="miniscule"
+												variant="minimal"
+												data-testid="mates-button"
+											/>
+										}
+									>
+										<ul
+											className={styles.resultsPlayers}
+											data-testid={`mates-cell-placement-${i}`}
 										>
-											{player.name ? (
-												player.name
-											) : (
-												// as any but we know it's a user since it doesn't have name
-												<Link
-													to={userPage(player as any)}
-													className="stack horizontal xs items-center"
+											{result.mates.map((player) => (
+												<li
+													key={player.name ? player.name : player.id}
+													className="flex items-center"
 												>
-													<Avatar user={player as any} size="xxs" />
-													{player.username}
-												</Link>
-											)}
-										</li>
-									))}
-								</ul>
+													{player.name ? (
+														player.name
+													) : (
+														// as any but we know it's a user since it doesn't have name
+														<Link
+															to={userPage(player as any)}
+															className="stack horizontal xs items-center"
+														>
+															<Avatar user={player as any} size="xxs" />
+															{player.username}
+														</Link>
+													)}
+												</li>
+											))}
+										</ul>
+									</SendouPopover>
+									{result.tournamentId ? (
+										<Link
+											to={tournamentTeamPage({
+												tournamentId: result.tournamentId,
+												tournamentTeamId: result.teamId,
+											})}
+										>
+											{result.teamName}
+										</Link>
+									) : (
+										result.teamName
+									)}
+								</div>
 							</td>
 						</tr>
 					);

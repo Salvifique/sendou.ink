@@ -8,7 +8,7 @@
 	"post.lastActive": "Mis à jour",
 	"noPosts": "Aucun message correspondant au filtre",
 	"expiring": "Le message expire. Tu cherches toujours ?",
-	"addFilter": "Ajouter un filtre",
+	"addFilter": "",
 	"filters.Weapon": "Arme utilisé",
 	"filters.Type": "Type de publication",
 	"filters.Timezone": "Différence horaire entre les heures",
@@ -28,5 +28,6 @@
 	"new.weaponPool.header": "Arme utilisé",
 	"new.weaponPool.userProfile": "profil",
 	"new.languages.header": "Langues",
+	"new.languages.placeholder": "Selectionner",
 	"new.languages.sqSettingsPage": "page de paramètres SendouQ"
 }

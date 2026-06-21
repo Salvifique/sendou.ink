@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { requireUserId } from "~/features/auth/core/user.server";
+import type { LoaderFunctionArgs } from "react-router";
+import { requireUser } from "~/features/auth/core/user.server";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
 import {
 	notFoundIfFalsy,
@@ -14,10 +14,8 @@ export const loader = async (args: LoaderFunctionArgs) => {
 		params: args.params,
 		schema: idObject,
 	});
-	const user = await requireUserId(args.request);
-	const event = notFoundIfFalsy(
-		await CalendarRepository.findById({ id: params.id }),
-	);
+	const user = requireUser();
+	const event = notFoundIfFalsy(await CalendarRepository.findById(params.id));
 
 	unauthorizedIfFalsy(
 		canReportCalendarEventWinners({

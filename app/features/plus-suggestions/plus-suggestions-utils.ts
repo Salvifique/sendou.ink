@@ -64,8 +64,8 @@ export function isFirstSuggestion({
 	suggestions,
 }: Pick<CanDeleteCommentArgs, "suggestionId" | "suggestions">) {
 	for (const suggestedUser of Object.values(suggestions).flat()) {
-		for (const [i, suggestion] of suggestedUser.suggestions.entries()) {
-			if (suggestion.id !== suggestionId) continue;
+		for (const [i, entry] of suggestedUser.entries.entries()) {
+			if (entry.id !== suggestionId) continue;
 
 			return i === 0;
 		}
@@ -84,13 +84,11 @@ function alreadyCommentedByUser({
 		(suggestion) =>
 			suggestion.tier === targetPlusTier &&
 			suggestion.suggested.id === suggested.id &&
-			suggestion.suggestions.some(
-				(suggestion) => suggestion.author.id === user?.id,
-			),
+			suggestion.entries.some((entry) => entry.author.id === user?.id),
 	);
 }
 
-export function playerAlreadySuggested({
+function playerAlreadySuggested({
 	suggestions,
 	suggested,
 	targetPlusTier,
@@ -121,14 +119,31 @@ function suggestionHasNoOtherComments({
 	suggestionId,
 }: Pick<CanDeleteCommentArgs, "suggestionId" | "suggestions">) {
 	for (const suggestedUser of Object.values(suggestions).flat()) {
-		for (const suggestion of suggestedUser.suggestions) {
-			if (suggestion.id !== suggestionId) continue;
+		for (const entry of suggestedUser.entries) {
+			if (entry.id !== suggestionId) continue;
 
-			return suggestedUser.suggestions.length === 1;
+			return suggestedUser.entries.length === 1;
 		}
 	}
 
 	throw new Error(`Invalid suggestion id: ${suggestionId}`);
+}
+
+interface CanEditSuggestionArgs {
+	suggestionId: Tables["PlusSuggestion"]["id"];
+	author: Pick<Tables["User"], "id">;
+	user?: Pick<Tables["User"], "id">;
+	suggestions: PlusSuggestionRepository.FindAllByMonthItem[];
+}
+export function canEditSuggestion(args: CanEditSuggestionArgs) {
+	const votingActive =
+		process.env.NODE_ENV === "test" ? false : isVotingActive();
+
+	return allTruthy([
+		!votingActive,
+		isFirstSuggestion(args),
+		args.author.id === args.user?.id,
+	]);
 }
 
 interface CanSuggestNewUserArgs {
@@ -156,21 +171,11 @@ function isPlusServerMember(user?: Pick<UserWithPlusTier, "plusTier">) {
 	return Boolean(user?.plusTier);
 }
 
-export function playerAlreadyMember({
-	suggested,
-	targetPlusTier,
-}: {
-	suggested: Pick<UserWithPlusTier, "id" | "plusTier">;
-	targetPlusTier: NonNullable<UserWithPlusTier["plusTier"]>;
-}) {
-	return suggested.plusTier && suggested.plusTier <= targetPlusTier;
-}
-
 function hasUserSuggestedThisMonth({
 	user,
 	suggestions,
 }: Pick<CanSuggestNewUserArgs, "user" | "suggestions">) {
 	return suggestions.some(
-		(suggestion) => suggestion.suggestions[0].author.id === user?.id,
+		(suggestion) => suggestion.entries[0].author.id === user?.id,
 	);
 }

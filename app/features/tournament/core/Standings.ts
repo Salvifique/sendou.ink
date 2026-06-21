@@ -2,6 +2,55 @@ import * as R from "remeda";
 import type { Standing } from "~/features/tournament-bracket/core/Bracket";
 import * as Progression from "~/features/tournament-bracket/core/Progression";
 import type { Tournament } from "~/features/tournament-bracket/core/Tournament";
+import invariant from "~/utils/invariant";
+import { getBracketProgressionLabel } from "../tournament-utils";
+
+export type TournamentStandingsResult =
+	| { type: "single"; standings: Standing[] }
+	| {
+			type: "multi";
+			standings: Array<{
+				div: string;
+				standings: Standing[];
+			}>;
+	  };
+
+/** Converts tournament standings from single or multi-division format into a flat array */
+export function flattenStandings(
+	standingsResult: TournamentStandingsResult,
+): Standing[] {
+	return standingsResult.type === "single"
+		? standingsResult.standings
+		: standingsResult.standings.flatMap((div) => div.standings);
+}
+
+/**
+ * Re-numbers placements in a sorted standings array so that tied placements stay
+ * grouped (e.g. `[1, 1, 3, 3, 5]`) while non-tied positions reflect the true
+ * number of teams above them. Useful after filtering or merging standings where
+ * the original placement numbers no longer match the team count.
+ *
+ * Pass `offset` to shift every placement downwards — used when the returned
+ * standings will be appended below standings from another bracket.
+ */
+export function reNumberPlacements<T extends { placement: number }>(
+	standings: T[],
+	offset = 0,
+): T[] {
+	let lastOriginalPlacement = 0;
+	let currentPlacement = 0;
+
+	return standings.map((standing, index) => {
+		if (standing.placement !== lastOriginalPlacement) {
+			lastOriginalPlacement = standing.placement;
+			currentPlacement = index + 1;
+		}
+		return {
+			...standing,
+			placement: currentPlacement + offset,
+		};
+	});
+}
 
 /** Calculates SPR (Seed Performance Rating) - see https://web.archive.org/web/20250513034545/https://www.pgstats.com/articles/introducing-spr-and-uf */
 export function calculateSPR({
@@ -45,13 +94,32 @@ export function matchesPlayed({
 	tournament: Tournament;
 	teamId: number;
 }) {
-	const brackets = Progression.bracketIdxsForStandings(
-		tournament.ctx.settings.bracketProgression,
-	)
+	const startingBracketIdx = tournament.teamById(teamId)?.startingBracketIdx;
+
+	let bracketIdxs: number[];
+
+	if (typeof startingBracketIdx !== "number" || startingBracketIdx === 0) {
+		bracketIdxs = Progression.bracketIdxsForStandings(
+			tournament.ctx.settings.bracketProgression,
+		);
+	} else {
+		const reachableBrackets = Progression.bracketsReachableFrom(
+			startingBracketIdx,
+			tournament.ctx.settings.bracketProgression,
+		);
+		const reachableSet = new Set(reachableBrackets);
+
+		const allBracketIdxs = tournament.ctx.settings.bracketProgression
+			.map((_, idx) => idx)
+			.sort((a, b) => b - a);
+		bracketIdxs = allBracketIdxs.filter((idx) => reachableSet.has(idx));
+	}
+
+	const brackets = bracketIdxs
 		.reverse()
 		.map((bracketIdx) => tournament.bracketByIdx(bracketIdx)!);
 
-	const matches = brackets.flatMap((bracket, bracketIdx) =>
+	const matches = brackets.flatMap((bracket, i) =>
 		bracket.data.match
 			.filter(
 				(match) =>
@@ -61,7 +129,10 @@ export function matchesPlayed({
 					(match.opponent1.result === "win" ||
 						match.opponent2?.result === "win"),
 			)
-			.map((match) => ({ ...match, bracketIdx })),
+			.map((match) => ({
+				...match,
+				bracketIdx: bracketIdxs[i],
+			})),
 	);
 
 	return matches.map((match) => {
@@ -86,10 +157,90 @@ export function matchesPlayed({
 	});
 }
 
-export function tournamentStandings(tournament: Tournament): Standing[] {
-	const bracketIdxs = Progression.bracketIdxsForStandings(
-		tournament.ctx.settings.bracketProgression,
-	);
+/**
+ * Computes the standings for a given tournament by aggregating results from relevant brackets.
+ *
+ * For example if the tournament format is round robin (where 2 out of 4 teams per group advance) to single elimination,
+ * the top teams are decided by the single elimination bracket, and the teams who failed to make the bracket are ordered
+ * by their performance in the round robin group stage.
+ *
+ * Returns a discriminated union:
+ * - For tournaments with a single starting bracket, returns type 'single' with overall standings
+ * - For tournaments with multiple starting brackets, returns type 'multi' with standings per division
+ */
+export function tournamentStandings(
+	tournament: Tournament,
+): TournamentStandingsResult {
+	const progression = tournament.ctx.settings.bracketProgression;
+	const startingBracketIdxs = Progression.startingBrackets(progression);
+
+	if (startingBracketIdxs.length <= 1) {
+		const standings = tournamentStandingsForBracket(tournament, undefined);
+
+		if (Progression.hasAbDivisionsFinals(progression)) {
+			return {
+				type: "multi",
+				standings: [
+					{
+						div: "A",
+						standings: reNumberPlacements(
+							standings.filter((s) => s.team.abDivision === 0),
+						),
+					},
+					{
+						div: "B",
+						standings: reNumberPlacements(
+							standings.filter((s) => s.team.abDivision === 1),
+						),
+					},
+				],
+			};
+		}
+
+		return {
+			type: "single",
+			standings,
+		};
+	}
+
+	return {
+		type: "multi",
+		standings: startingBracketIdxs.map((bracketIdx) => ({
+			div: getBracketProgressionLabel(bracketIdx, progression),
+			standings: tournamentStandingsForBracket(tournament, bracketIdx),
+		})),
+	};
+}
+
+/**
+ * Computes the standings for a given tournament starting from a specific bracket.
+ * If bracketIdx is undefined, computes overall standings for the entire tournament.
+ * Otherwise, only includes brackets that are reachable from the given bracketIdx.
+ */
+function tournamentStandingsForBracket(
+	tournament: Tournament,
+	bracketIdx: number | undefined,
+): Standing[] {
+	let bracketIdxs: number[];
+
+	const isSingleStartingBracket = typeof bracketIdx !== "number";
+
+	if (isSingleStartingBracket) {
+		bracketIdxs = Progression.bracketIdxsForStandings(
+			tournament.ctx.settings.bracketProgression,
+		);
+	} else {
+		const reachableBrackets = Progression.bracketsReachableFrom(
+			bracketIdx,
+			tournament.ctx.settings.bracketProgression,
+		);
+		const reachableSet = new Set(reachableBrackets);
+
+		const allBracketIdxs = tournament.ctx.settings.bracketProgression
+			.map((_, idx) => idx)
+			.sort((a, b) => b - a);
+		bracketIdxs = allBracketIdxs.filter((idx) => reachableSet.has(idx));
+	}
 
 	const result: Standing[] = [];
 	const alreadyIncludedTeamIds = new Set<number>();
@@ -98,16 +249,19 @@ export function tournamentStandings(tournament: Tournament): Standing[] {
 		(bracket) => bracket.isFinals && bracket.everyMatchOver,
 	);
 
-	for (const bracketIdx of bracketIdxs) {
-		const bracket = tournament.bracketByIdx(bracketIdx);
-		if (!bracket) continue;
+	for (const idx of bracketIdxs) {
+		const bracket = tournament.bracketByIdx(idx);
+		invariant(bracket);
+
 		// sometimes a bracket might not be played so then we ignore it from the standings
-		if (finalBracketIsOver && bracket.preview) continue;
+		if (isSingleStartingBracket && finalBracketIsOver && bracket.preview) {
+			continue;
+		}
 
 		const standings = standingsToMergeable({
 			alreadyIncludedTeamIds,
 			standings: bracket.standings,
-			teamsAboveCount: alreadyIncludedTeamIds.size,
+			teamsAboveFromAnotherBracketsCount: alreadyIncludedTeamIds.size,
 		});
 		result.push(...standings);
 
@@ -127,30 +281,21 @@ function standingsToMergeable<
 >({
 	alreadyIncludedTeamIds,
 	standings,
-	teamsAboveCount,
+	teamsAboveFromAnotherBracketsCount,
 }: {
 	alreadyIncludedTeamIds: Set<number>;
 	standings: T[];
-	teamsAboveCount: number;
+	teamsAboveFromAnotherBracketsCount: number;
 }) {
-	const result: T[] = [];
-
 	const filtered = standings.filter(
 		(standing) => !alreadyIncludedTeamIds.has(standing.team.id),
 	);
 
-	let placement = teamsAboveCount + 1;
+	// e.g. if standings start at 3rd place, this must mean there is 2 teams left to finish _this_ bracket
+	const unfinishedTeamsCount = (standings.at(0)?.placement ?? 1) - 1;
 
-	for (const [i, standing] of filtered.entries()) {
-		const placementChanged =
-			i !== 0 && standing.placement !== filtered[i - 1].placement;
-
-		if (placementChanged) {
-			placement = teamsAboveCount + i + 1;
-		}
-
-		result.push({ ...standing, placement });
-	}
-
-	return result;
+	return reNumberPlacements(
+		filtered,
+		teamsAboveFromAnotherBracketsCount + unfinishedTeamsCount,
+	);
 }

@@ -1,34 +1,30 @@
-import type { MetaFunction } from "@remix-run/node";
-import { Form, useLoaderData } from "@remix-run/react";
 import Compressor from "compressorjs";
+import { X } from "lucide-react";
 import { nanoid } from "nanoid";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
-import { useFetcher } from "react-router-dom";
+import type { MetaFunction } from "react-router";
+import { Form, useFetcher, useLoaderData } from "react-router";
 import { Alert } from "~/components/Alert";
 import { SendouButton } from "~/components/elements/Button";
 import { SendouSwitch } from "~/components/elements/Switch";
 import { UserSearch } from "~/components/elements/UserSearch";
 import { FormMessage } from "~/components/FormMessage";
-import { CrossIcon } from "~/components/icons/Cross";
 import { Label } from "~/components/Label";
 import { Main } from "~/components/Main";
 import { useHasRole } from "~/modules/permissions/hooks";
 import invariant from "~/utils/invariant";
 import { logger } from "~/utils/logger";
 import type { SendouRouteHandle } from "~/utils/remix.server";
-import {
-	artPage,
-	conditionalUserSubmittedImage,
-	navIconUrl,
-} from "~/utils/urls";
+import { artPage, navIconUrl } from "~/utils/urls";
 import { metaTitle } from "../../../utils/remix";
 import { action } from "../actions/art.new.server";
 import { ART } from "../art-constants";
 import { previewUrl } from "../art-utils";
 import { TagSelect } from "../components/TagSelect";
 import { loader } from "../loaders/art.new.server";
-export { loader, action };
+
+export { action, loader };
 
 export const handle: SendouRouteHandle = {
 	i18n: ["art"],
@@ -69,7 +65,7 @@ export default function NewArtPage() {
 	const submitButtonDisabled = () => {
 		if (fetcher.state !== "idle") return true;
 
-		return !img && !data.art;
+		return (!img || !smallImg) && !data.art;
 	};
 
 	if (!isArtist) {
@@ -116,12 +112,7 @@ function ImageUpload({
 	const id = React.useId();
 
 	if (data.art) {
-		return (
-			<img
-				src={conditionalUserSubmittedImage(previewUrl(data.art.url))}
-				alt=""
-			/>
-		);
+		return <img src={previewUrl(data.art.url)} alt="" />;
 	}
 
 	return (
@@ -129,9 +120,7 @@ function ImageUpload({
 			<label htmlFor={id}>{t("common:upload.imageToUpload")}</label>
 			<input
 				id={id}
-				className="plain"
 				type="file"
-				name="img"
 				accept="image/png, image/jpeg, image/jpg, image/webp"
 				onChange={(e) => {
 					const uploadedFile = e.target.files?.[0];
@@ -300,7 +289,7 @@ function Tags() {
 						<div key={t.name} className="stack horizontal">
 							{t.name}{" "}
 							<SendouButton
-								icon={<CrossIcon />}
+								icon={<X />}
 								size="small"
 								variant="minimal-destructive"
 								className="art__delete-tag-button"
@@ -322,8 +311,11 @@ function LinkedUsers() {
 	const [users, setUsers] = React.useState<
 		{ inputId: string; userId?: number }[]
 	>(
-		(data.art?.linkedUsers ?? []).length > 0
-			? data.art!.linkedUsers.map((userId) => ({ userId, inputId: nanoid() }))
+		data.art?.linkedUsers && data.art.linkedUsers.length > 0
+			? data.art.linkedUsers.map((user) => ({
+					userId: user.id,
+					inputId: nanoid(),
+				}))
 			: [{ inputId: nanoid() }],
 	);
 
@@ -344,7 +336,7 @@ function LinkedUsers() {
 							name="user"
 							onChange={(newUser) => {
 								const newUsers = structuredClone(users);
-								newUsers[i] = { ...newUsers[i], userId: newUser.id };
+								newUsers[i] = { ...newUsers[i], userId: newUser?.id };
 
 								setUsers(newUsers);
 							}}
@@ -361,7 +353,7 @@ function LinkedUsers() {
 										setUsers(users.filter((u) => u.inputId !== inputId));
 									}
 								}}
-								icon={<CrossIcon />}
+								icon={<X />}
 							/>
 						) : null}
 					</div>

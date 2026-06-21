@@ -1,5 +1,3 @@
-import "dotenv/config";
-
 import { db } from "~/db/sql";
 import homemadeBadges from "~/features/badges/homemade.json";
 import { logger } from "~/utils/logger";
@@ -95,6 +93,7 @@ async function findUserByDiscordId(discordId: string) {
 async function deleteBadge(badgeId: number) {
 	const owners = await db
 		.selectFrom("BadgeOwner")
+		.select("badgeId")
 		.where("badgeId", "=", badgeId)
 		.execute();
 
@@ -106,6 +105,18 @@ async function deleteBadge(badgeId: number) {
 	await db.transaction().execute(async (trx) => {
 		await trx
 			.deleteFrom("BadgeManager")
+			.where("badgeId", "=", badgeId)
+			.execute();
+		await trx
+			.deleteFrom("CalendarEventBadge")
+			.where("badgeId", "=", badgeId)
+			.execute();
+		await trx
+			.deleteFrom("TournamentBadgeOwner")
+			.where("badgeId", "=", badgeId)
+			.execute();
+		await trx
+			.deleteFrom("TournamentOrganizationBadge")
 			.where("badgeId", "=", badgeId)
 			.execute();
 		await trx.deleteFrom("Badge").where("id", "=", badgeId).execute();

@@ -1,18 +1,19 @@
 import clsx from "clsx";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Ability } from "~/components/Ability";
 import { SendouButton } from "~/components/elements/Button";
 import { ModeImage } from "~/components/Image";
-import { CrossIcon } from "~/components/icons/Cross";
-import { possibleApValues } from "~/features/build-analyzer";
+import { possibleApValues } from "~/features/build-analyzer/core/utils";
+import { useDateTimeFormat } from "~/hooks/intl/useDateTimeFormat";
 import { abilities } from "~/modules/in-game-lists/abilities";
 import { modesShort } from "~/modules/in-game-lists/modes";
 import type {
 	Ability as AbilityType,
 	ModeShort,
 } from "~/modules/in-game-lists/types";
-import { dateToYYYYMMDD } from "~/utils/dates";
-import { PATCHES } from "../builds-constants";
+import { dateToYYYYMMDD, isValidDate } from "~/utils/dates";
+import { RECENT_PATCHES } from "../builds-constants";
 import type {
 	AbilityBuildFilter,
 	BuildFilter,
@@ -46,7 +47,7 @@ export function FilterSection({
 				</div>
 				<div>
 					<SendouButton
-						icon={<CrossIcon />}
+						icon={<X />}
 						size="small"
 						variant="minimal-destructive"
 						onPress={remove}
@@ -194,28 +195,28 @@ function DateFilter({
 	filter: DateBuildFilter;
 	onChange: (filter: Partial<DateBuildFilter>) => void;
 }) {
-	const { t, i18n } = useTranslation(["builds"]);
+	const { t } = useTranslation(["builds"]);
+	const { formatter: patchDateFormatter } = useDateTimeFormat({
+		day: "numeric",
+		month: "numeric",
+		year: "numeric",
+	});
 
-	const selectValue = () => {
-		const dateString = dateToYYYYMMDD(new Date(filter.date));
-
-		if (
-			PATCHES.find(({ date }) => {
-				return new Date(date).toISOString().split("T")[0] === dateString;
-			})
-		) {
-			return dateString;
-		}
-
-		return "CUSTOM";
-	};
+	const selectValue = () =>
+		RECENT_PATCHES.some(({ date }) => date === filter.date)
+			? filter.date
+			: "CUSTOM";
 
 	// on Saturday so it doesn't overlap with actual path dates (no patches on Saturdays)
 	const oneMonthAgoOnSaturday = new Date();
-	oneMonthAgoOnSaturday.setDate(oneMonthAgoOnSaturday.getDate() - 30);
-	oneMonthAgoOnSaturday.setDate(
-		oneMonthAgoOnSaturday.getDate() - oneMonthAgoOnSaturday.getDay() + 6,
+	oneMonthAgoOnSaturday.setUTCDate(oneMonthAgoOnSaturday.getUTCDate() - 30);
+	oneMonthAgoOnSaturday.setUTCDate(
+		oneMonthAgoOnSaturday.getUTCDate() - oneMonthAgoOnSaturday.getUTCDay() + 6,
 	);
+
+	const customDate = isValidDate(new Date(filter.date))
+		? new Date(filter.date)
+		: oneMonthAgoOnSaturday;
 
 	return (
 		<div className={clsx(styles.filter, styles.filterDate)}>
@@ -233,18 +234,12 @@ function DateFilter({
 					})
 				}
 			>
-				{PATCHES.map(({ patch, date: dateString }) => {
+				{RECENT_PATCHES.map(({ patch, date: dateString }) => {
 					const date = new Date(dateString);
 
 					return (
 						<option key={patch} value={dateString}>
-							{patch} (
-							{date.toLocaleDateString(i18n.language, {
-								day: "numeric",
-								month: "long",
-								year: "numeric",
-							})}
-							)
+							{patch} ({patchDateFormatter.format(date) ?? ""})
 						</option>
 					);
 				})}
@@ -253,7 +248,7 @@ function DateFilter({
 			{selectValue() === "CUSTOM" ? (
 				<input
 					type="date"
-					value={dateToYYYYMMDD(new Date(filter.date))}
+					value={dateToYYYYMMDD(customDate)}
 					onChange={(e) => onChange({ date: e.target.value })}
 					max={dateToYYYYMMDD(new Date())}
 					data-testid="date-input"

@@ -1,25 +1,20 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
-import { cors } from "remix-utils/cors";
-import { z } from "zod/v4";
+import type { LoaderFunctionArgs } from "react-router";
+import { z } from "zod";
 import { db } from "~/db/sql";
+import * as Seasons from "~/features/mmr/core/Seasons";
+import { userSkills as _userSkills } from "~/features/mmr/tiered.server";
+import * as UserRepository from "~/features/user-page/UserRepository.server";
 import { i18next } from "~/modules/i18n/i18next.server";
 import { safeNumberParse } from "~/utils/number";
 import { notFoundIfFalsy, parseParams } from "~/utils/remix.server";
-import {
-	handleOptionsRequest,
-	requireBearerAuth,
-} from "../api-public-utils.server";
 import type { GetUserResponse } from "../schema";
 
 const paramsSchema = z.object({
 	identifier: z.string(),
 });
 
-export const loader = async ({ params, request }: LoaderFunctionArgs) => {
-	await handleOptionsRequest(request);
-	requireBearerAuth(request);
-
+export const loader = async ({ params }: LoaderFunctionArgs) => {
 	const t = await i18next.getFixedT("en", ["weapons"]);
 	const { identifier } = parseParams({ params, schema: paramsSchema });
 
@@ -27,6 +22,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 		await db
 			.selectFrom("User")
 			.leftJoin("PlusTier", "PlusTier.userId", "User.id")
+			.leftJoin("SplatoonPlayer", "SplatoonPlayer.userId", "User.id")
 			.select(({ eb }) => [
 				"User.id",
 				"User.country",
@@ -37,6 +33,8 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 				"User.customUrl",
 				"User.discordId",
 				"User.discordAvatar",
+				"User.inGameName",
+				"User.pronouns",
 				"PlusTier.tier",
 				jsonArrayFrom(
 					eb
@@ -45,29 +43,16 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 						.whereRef("UserWeapon.userId", "=", "User.id")
 						.orderBy("UserWeapon.order", "asc"),
 				).as("weapons"),
+				"SplatoonPlayer.peakXp",
 				jsonArrayFrom(
 					eb
-						.selectFrom("BadgeOwner")
-						.innerJoin("Badge", "Badge.id", "BadgeOwner.badgeId")
-						.select(({ fn }) => [
-							"Badge.displayName",
-							"Badge.code",
-							fn.count<number>("BadgeOwner.badgeId").as("count"),
-						])
-						.groupBy(["BadgeOwner.badgeId", "BadgeOwner.userId"])
-						.whereRef("BadgeOwner.userId", "=", "User.id"),
-				).as("badges"),
-				jsonArrayFrom(
-					eb
-						.selectFrom("SplatoonPlayer")
-						.innerJoin(
-							"XRankPlacement",
-							"XRankPlacement.playerId",
-							"SplatoonPlayer.id",
-						)
-						.select(["XRankPlacement.power"])
-						.whereRef("SplatoonPlayer.userId", "=", "User.id"),
-				).as("xRankPlacements"),
+						.selectFrom("TeamMemberWithSecondary")
+						.innerJoin("Team", "Team.id", "TeamMemberWithSecondary.teamId")
+						.select(["Team.id", "TeamMemberWithSecondary.role"])
+						.whereRef("TeamMemberWithSecondary.userId", "=", "User.id")
+						.orderBy("TeamMemberWithSecondary.isMainTeam", "desc")
+						.orderBy("TeamMemberWithSecondary.createdAt", "asc"),
+				).as("teams"),
 			])
 			.where((eb) => {
 				// we don't want to parse discord id's as numbers (length = 18)
@@ -82,6 +67,13 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 			.executeTakeFirst(),
 	);
 
+	const badges = await UserRepository.ownedBadgesByUserId(user.id);
+
+	const season = Seasons.currentOrPrevious(new Date())!.nth;
+
+	const { isAccurateTiers, userSkills } = _userSkills(season);
+	const skill = isAccurateTiers ? userSkills[user.id] : null;
+
 	const result: GetUserResponse = {
 		id: user.id,
 		name: user.discordName,
@@ -91,6 +83,8 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 			: null,
 		url: `https://sendou.ink/u/${user.customUrl ?? user.discordId}`,
 		country: user.country,
+		inGameName: user.inGameName,
+		pronouns: user.pronouns,
 		plusServerTier: user.tier as GetUserResponse["plusServerTier"],
 		socials: {
 			twitch: user.twitch,
@@ -98,25 +92,29 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 			bsky: user.bsky,
 			twitter: null, // deprecated field
 		},
-		peakXp:
-			user.xRankPlacements.length > 0
-				? user.xRankPlacements.reduce((acc, cur) => {
-						if (!cur.power) return acc;
-						return Math.max(acc, cur.power);
-					}, 0)
-				: null,
+		currentRank: skill?.tier
+			? {
+					season,
+					tier: skill.tier,
+				}
+			: null,
+		peakXp: user.peakXp,
 		weaponPool: user.weapons.map((weapon) => ({
 			id: weapon.weaponSplId,
 			name: t(`weapons:MAIN_${weapon.weaponSplId}`),
 			isFiveStar: Boolean(weapon.isFavorite),
 		})),
-		badges: user.badges.map((badge) => ({
+		badges: badges.map((badge) => ({
 			name: badge.displayName,
 			count: badge.count,
 			gifUrl: `https://sendou.ink/static-assets/badges/${badge.code}.gif`,
-			imageUrl: `https://sendou.ink/static-assets/badges/${badge.code}.png`,
+			imageUrl: `https://sendou.ink/static-assets/badges/${badge.code}.avif`,
+		})),
+		teams: user.teams.map((team) => ({
+			id: team.id,
+			role: team.role,
 		})),
 	};
 
-	return await cors(request, json(result));
+	return Response.json(result);
 };

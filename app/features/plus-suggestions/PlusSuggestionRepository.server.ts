@@ -1,57 +1,35 @@
 import { formatDistance } from "date-fns";
-import type { Insertable } from "kysely";
+import type { Insertable, NotNull } from "kysely";
 import { jsonObjectFrom } from "kysely/helpers/sqlite";
 import { db } from "~/db/sql";
 import type { DB } from "~/db/tables";
 import type { MonthYear } from "~/features/plus-voting/core";
-import { databaseTimestampToDate } from "~/utils/dates";
-import { COMMON_USER_FIELDS } from "~/utils/kysely.server";
+import { databaseTimestampNow, databaseTimestampToDate } from "~/utils/dates";
+import { commonUserSelect } from "~/utils/kysely.server";
 import type { Unwrapped } from "~/utils/types";
 
-// TODO: can be made better when $narrowNotNull lands
-type FindAllByMonthRow = {
-	tier: number;
-	id: number;
-	text: string;
-	createdAt: number;
-	author: {
-		id: number;
-		username: string;
-		discordId: string;
-		discordAvatar: string | null;
-	};
-	suggested: {
-		id: number;
-		username: string;
-		discordId: string;
-		discordAvatar: string | null;
-		bio: string | null;
-		plusTier: number | null;
-	};
-};
-
-// TODO: naming is a bit weird here (suggestion inside suggestions)
 export type FindAllByMonthItem = Unwrapped<typeof findAllByMonth>;
 export async function findAllByMonth(args: MonthYear) {
-	const allRows = (await db
+	const allRows = await db
 		.selectFrom("PlusSuggestion")
 		.select(({ eb }) => [
 			"PlusSuggestion.id",
 			"PlusSuggestion.createdAt",
+			"PlusSuggestion.updatedAt",
 			"PlusSuggestion.text",
 			"PlusSuggestion.tier",
 			jsonObjectFrom(
 				eb
 					.selectFrom("User")
-					.select(COMMON_USER_FIELDS)
+					.select((eb) => commonUserSelect(eb))
 					.whereRef("PlusSuggestion.authorId", "=", "User.id"),
 			).as("author"),
 			jsonObjectFrom(
 				eb
 					.selectFrom("User")
 					.leftJoin("PlusTier", "PlusSuggestion.suggestedId", "PlusTier.userId")
-					.select([
-						...COMMON_USER_FIELDS,
+					.select((eb) => [
+						...commonUserSelect(eb),
 						"User.bio",
 						"PlusTier.tier as plusTier",
 					])
@@ -61,7 +39,8 @@ export async function findAllByMonth(args: MonthYear) {
 		.where("PlusSuggestion.month", "=", args.month)
 		.where("PlusSuggestion.year", "=", args.year)
 		.orderBy("PlusSuggestion.createdAt", "asc")
-		.execute()) as FindAllByMonthRow[];
+		.$narrowType<{ author: NotNull; suggested: NotNull }>()
+		.execute();
 
 	// filter out suggestions that were made in the time period
 	// between voting ending and people gaining access from the leaderboard
@@ -69,26 +48,28 @@ export async function findAllByMonth(args: MonthYear) {
 		(r) => !r.suggested.plusTier || r.suggested.plusTier > r.tier,
 	);
 
+	type Row = (typeof rows)[number];
+
 	const result: Array<{
-		suggested: FindAllByMonthRow["suggested"];
-		tier: FindAllByMonthRow["tier"];
-		suggestions: Array<{
-			author: FindAllByMonthRow["author"];
+		suggested: Row["suggested"];
+		tier: Row["tier"];
+		entries: Array<{
+			author: Row["author"];
 			createdAtRelative: string;
 			createdAt: number;
-			id: FindAllByMonthRow["id"];
-			text: FindAllByMonthRow["text"];
+			updatedAt: number | null;
+			updatedAtRelative: string | null;
+			id: Row["id"];
+			text: Row["text"];
 		}>;
 	}> = [];
 
 	for (const row of rows) {
 		const existing = result.find(
-			(suggestion) =>
-				suggestion.tier === row.tier &&
-				row.suggested.id === suggestion.suggested.id,
+			(r) => r.tier === row.tier && row.suggested.id === r.suggested.id,
 		);
 
-		const mappedSuggestion = {
+		const entry = {
 			id: row.id,
 			text: row.text,
 			createdAtRelative: formatDistance(
@@ -97,26 +78,38 @@ export async function findAllByMonth(args: MonthYear) {
 				{ addSuffix: true },
 			),
 			createdAt: row.createdAt,
+			updatedAt: row.updatedAt,
+			updatedAtRelative: row.updatedAt
+				? formatDistance(databaseTimestampToDate(row.updatedAt), new Date(), {
+						addSuffix: true,
+					})
+				: null,
 			author: row.author,
 		};
 		if (existing) {
-			existing.suggestions.push(mappedSuggestion);
+			existing.entries.push(entry);
 		} else {
 			result.push({
 				tier: row.tier,
 				suggested: row.suggested,
-				suggestions: [mappedSuggestion],
+				entries: [entry],
 			});
 		}
 	}
 
-	return result.sort(
-		(a, b) => b.suggestions[0].createdAt - a.suggestions[0].createdAt,
-	);
+	return result.sort((a, b) => b.entries[0].createdAt - a.entries[0].createdAt);
 }
 
 export function create(args: Insertable<DB["PlusSuggestion"]>) {
 	return db.insertInto("PlusSuggestion").values(args).execute();
+}
+
+export function updateTextById(id: number, text: string) {
+	return db
+		.updateTable("PlusSuggestion")
+		.set({ text, updatedAt: databaseTimestampNow() })
+		.where("id", "=", id)
+		.execute();
 }
 
 export function deleteById(id: number) {

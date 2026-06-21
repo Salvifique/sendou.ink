@@ -1,3 +1,4 @@
+import { Plus } from "lucide-react";
 import { nanoid } from "nanoid";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
@@ -6,11 +7,12 @@ import { SendouButton } from "~/components/elements/Button";
 import { SendouSwitch } from "~/components/elements/Switch";
 import { FormMessage } from "~/components/FormMessage";
 import { Input } from "~/components/Input";
-import { PlusIcon } from "~/components/icons/Plus";
 import { Label } from "~/components/Label";
 import { TOURNAMENT } from "~/features/tournament/tournament-constants";
 import * as Progression from "~/features/tournament-bracket/core/Progression";
+import * as Swiss from "~/features/tournament-bracket/core/Swiss";
 import { defaultBracketSettings } from "../../tournament/tournament-utils";
+import styles from "./BracketProgressionSelector.module.css";
 
 const defaultBracket = (): Progression.InputBracket => ({
 	id: nanoid(),
@@ -23,12 +25,13 @@ const defaultBracket = (): Progression.InputBracket => ({
 export function BracketProgressionSelector({
 	initialBrackets,
 	isInvitationalTournament,
-	setErrored,
+	onChange,
 	isTournamentInProgress,
 }: {
 	initialBrackets?: Progression.InputBracket[];
 	isInvitationalTournament: boolean;
-	setErrored: (errored: boolean) => void;
+	/** Emits the validated brackets while valid, or `null` while invalid/incomplete. */
+	onChange: (value: Progression.ParsedBracket[] | null) => void;
 	isTournamentInProgress: boolean;
 }) {
 	const [brackets, setBrackets] = React.useState<Progression.InputBracket[]>(
@@ -73,24 +76,21 @@ export function BracketProgressionSelector({
 	};
 
 	const validated = Progression.validatedBrackets(brackets);
+	// `validatedBrackets` returns a fresh array each render, so emit only when the
+	// serialized result actually changes — otherwise `onChange` would loop the form store.
+	const serialized = Progression.isBrackets(validated)
+		? JSON.stringify(validated)
+		: null;
+	const lastSerialized = React.useRef<string | null | undefined>(undefined);
 
 	React.useEffect(() => {
-		if (Progression.isError(validated)) {
-			setErrored(true);
-		} else {
-			setErrored(false);
-		}
-	}, [validated, setErrored]);
+		if (lastSerialized.current === serialized) return;
+		lastSerialized.current = serialized;
+		onChange(serialized ? JSON.parse(serialized) : null);
+	}, [serialized, onChange]);
 
 	return (
 		<div className="stack lg items-start">
-			{Progression.isBrackets(validated) ? (
-				<input
-					type="hidden"
-					name="bracketProgression"
-					value={JSON.stringify(validated)}
-				/>
-			) : null}
 			<div className="stack lg">
 				{brackets.map((bracket, i) => (
 					<TournamentFormatBracketSelector
@@ -98,8 +98,26 @@ export function BracketProgressionSelector({
 						bracket={bracket}
 						brackets={brackets}
 						onChange={(newBracket) => {
-							const newBrackets = [...brackets];
+							const newBrackets = structuredClone(brackets);
 							newBrackets[i] = newBracket;
+
+							if (newBracket.settings.advanceThreshold) {
+								const destinationIdx = newBrackets.findIndex((b) =>
+									b.sources?.some(
+										(source) => source.bracketId === newBracket.id,
+									),
+								);
+
+								if (destinationIdx !== -1) {
+									newBrackets[destinationIdx].sources = newBrackets[
+										destinationIdx
+									].sources?.map((source) => ({
+										...source,
+										placements: "",
+									}));
+								}
+							}
+
 							setBrackets(newBrackets);
 						}}
 						onDelete={
@@ -114,7 +132,7 @@ export function BracketProgressionSelector({
 				))}
 			</div>
 			<SendouButton
-				icon={<PlusIcon />}
+				icon={<Plus />}
 				size="small"
 				variant="outlined"
 				onPress={handleAddBracket}
@@ -170,7 +188,7 @@ function TournamentFormatBracketSelector({
 	return (
 		<div className="stack horizontal md items-center">
 			<div>
-				<div className="format-selector__count">Bracket #{count}</div>
+				<div className={styles.count}>Bracket #{count}</div>
 				{onDelete ? (
 					<SendouButton
 						size="small"
@@ -183,7 +201,7 @@ function TournamentFormatBracketSelector({
 					</SendouButton>
 				) : null}
 			</div>
-			<div className="format-selector__divider" />
+			<div className={styles.divider} />
 			<div className="stack md items-start">
 				<div>
 					<Label htmlFor={createId("name")}>Bracket's name</Label>
@@ -279,7 +297,7 @@ function TournamentFormatBracketSelector({
 
 				{bracket.type === "round_robin" ? (
 					<div>
-						<Label htmlFor="teamsPerGroup">Teams per group</Label>
+						<Label htmlFor="teamsPerGroup">Max participants per group</Label>
 						<select
 							value={
 								bracket.settings.teamsPerGroup ??
@@ -298,11 +316,57 @@ function TournamentFormatBracketSelector({
 							id="teamsPerGroup"
 							disabled={bracket.disabled}
 						>
-							<option value="3">3</option>
-							<option value="4">4</option>
-							<option value="5">5</option>
-							<option value="6">6</option>
+							{(bracket.settings.hasAbDivisions
+								? TOURNAMENT.RR_AB_DIVISIONS_TEAMS_PER_GROUP_OPTIONS
+								: TOURNAMENT.RR_TEAMS_PER_GROUP_OPTIONS
+							).map((n) => (
+								<option key={n} value={n}>
+									{n}
+								</option>
+							))}
 						</select>
+						<FormMessage type="info">
+							Participants are distributed equally, so groups may have fewer
+							than selected
+						</FormMessage>
+					</div>
+				) : null}
+
+				{bracket.type === "round_robin" && !bracket.sources ? (
+					<div>
+						<Label htmlFor={createId("abDivisions")}>A/B divisions</Label>
+						<SendouSwitch
+							id={createId("abDivisions")}
+							isSelected={Boolean(bracket.settings.hasAbDivisions)}
+							onChange={(isSelected) => {
+								const currentTeamsPerGroup =
+									bracket.settings.teamsPerGroup ??
+									TOURNAMENT.RR_DEFAULT_TEAM_COUNT_PER_GROUP;
+
+								const maxWithoutAb = Math.max(
+									...TOURNAMENT.RR_TEAMS_PER_GROUP_OPTIONS,
+								);
+
+								let nextTeamsPerGroup = currentTeamsPerGroup;
+								if (isSelected && currentTeamsPerGroup % 2 !== 0) {
+									nextTeamsPerGroup = currentTeamsPerGroup + 1;
+								} else if (!isSelected && currentTeamsPerGroup > maxWithoutAb) {
+									nextTeamsPerGroup = maxWithoutAb;
+								}
+
+								updateBracket({
+									settings: {
+										...bracket.settings,
+										hasAbDivisions: isSelected,
+										teamsPerGroup: nextTeamsPerGroup,
+									},
+								});
+							}}
+							isDisabled={bracket.disabled}
+						/>
+						<FormMessage type="info">
+							Teams split into A and B pools; every A plays every B once
+						</FormMessage>
 					</div>
 				) : null}
 
@@ -345,14 +409,26 @@ function TournamentFormatBracketSelector({
 								bracket.settings.roundCount ??
 								TOURNAMENT.SWISS_DEFAULT_ROUND_COUNT
 							}
-							onChange={(e) =>
+							onChange={(e) => {
+								const newRoundCount = Number(e.target.value);
+								const currentAdvanceThreshold =
+									bracket.settings.advanceThreshold;
+
 								updateBracket({
 									settings: {
 										...bracket.settings,
-										roundCount: Number(e.target.value),
+										roundCount: newRoundCount,
+										advanceThreshold:
+											currentAdvanceThreshold &&
+											!Swiss.isValidAdvanceThreshold({
+												roundCount: newRoundCount,
+												advanceThreshold: currentAdvanceThreshold,
+											})
+												? 3
+												: currentAdvanceThreshold,
 									},
-								})
-							}
+								});
+							}}
 							className="w-max"
 							name="swissRoundCount"
 							id="swissRoundCount"
@@ -368,6 +444,74 @@ function TournamentFormatBracketSelector({
 					</div>
 				) : null}
 
+				{bracket.type === "swiss" ? (
+					<div>
+						<Label htmlFor={createId("earlyAdvance")}>
+							Early advance/elimination
+						</Label>
+						<SendouSwitch
+							id={createId("earlyAdvance")}
+							isSelected={Boolean(bracket.settings.advanceThreshold)}
+							onChange={(isSelected) =>
+								updateBracket({
+									settings: {
+										...bracket.settings,
+										advanceThreshold: isSelected ? 3 : undefined,
+									},
+								})
+							}
+							isDisabled={bracket.disabled}
+						/>
+						<FormMessage type="info">
+							Teams stop playing once they reach required wins or exceed maximum
+							losses
+						</FormMessage>
+					</div>
+				) : null}
+
+				{bracket.type === "swiss" && bracket.settings.advanceThreshold ? (
+					<div>
+						<Label htmlFor={createId("advanceThreshold")}>
+							Wins needed to advance
+						</Label>
+						<select
+							value={bracket.settings.advanceThreshold}
+							onChange={(e) => {
+								const newThreshold = Number(e.target.value);
+								updateBracket({
+									settings: {
+										...bracket.settings,
+										advanceThreshold: newThreshold,
+									},
+								});
+							}}
+							className="w-max"
+							name="advanceThreshold"
+							id={createId("advanceThreshold")}
+							disabled={bracket.disabled}
+						>
+							{Swiss.validAdvanceThresholdOptions({
+								roundCount:
+									bracket.settings.roundCount ??
+									TOURNAMENT.SWISS_DEFAULT_ROUND_COUNT,
+							}).map((threshold) => (
+								<option key={threshold} value={threshold}>
+									{threshold}
+								</option>
+							))}
+						</select>
+						<FormMessage type="info">
+							Maximum losses allowed:{" "}
+							{Swiss.eliminationThreshold({
+								roundCount:
+									bracket.settings.roundCount ??
+									TOURNAMENT.SWISS_DEFAULT_ROUND_COUNT,
+								advanceThreshold: bracket.settings.advanceThreshold,
+							}) - 1}
+						</FormMessage>
+					</div>
+				) : null}
+
 				<div>
 					<div className="stack horizontal sm">
 						<Label htmlFor={createId("source")}>Source</Label>{" "}
@@ -376,7 +520,6 @@ function TournamentFormatBracketSelector({
 						<div className="stack sm horizontal mt-1 mb-2">
 							<SendouSwitch
 								id={createId("follow-up-bracket")}
-								size="small"
 								isSelected={Boolean(bracket.sources)}
 								onChange={(isSelected) =>
 									updateBracket({
@@ -429,40 +572,51 @@ function SourcesSelector({
 		return `${id}-${label}`;
 	};
 
+	const inputBracket = brackets.find((b) => b.id === source?.bracketId);
+
 	return (
-		<div className="stack horizontal sm items-end">
-			<div>
-				<Label htmlFor={createId("bracket")}>Bracket</Label>
-				<select
-					id={createId("bracket")}
-					value={source?.bracketId ?? brackets[0].id}
-					onChange={(e) =>
-						onChange({ placements: "", ...source, bracketId: e.target.value })
-					}
-				>
-					{brackets.map((bracket) => (
-						<option key={bracket.id} value={bracket.id}>
-							{bracket.name}
-						</option>
-					))}
-				</select>
+		<div>
+			<div className="stack horizontal sm items-end">
+				<div>
+					<Label htmlFor={createId("bracket")}>Bracket</Label>
+					<select
+						id={createId("bracket")}
+						value={source?.bracketId ?? brackets[0].id}
+						onChange={(e) =>
+							onChange({ placements: "", ...source, bracketId: e.target.value })
+						}
+					>
+						{brackets.map((bracket) => (
+							<option key={bracket.id} value={bracket.id}>
+								{bracket.name}
+							</option>
+						))}
+					</select>
+				</div>
+				{!inputBracket?.settings.advanceThreshold ? (
+					<div>
+						<Label htmlFor={createId("placements")}>Placements</Label>
+						<Input
+							id={createId("placements")}
+							placeholder="1,2,3"
+							value={source?.placements ?? ""}
+							testId="placements-input"
+							onChange={(e) =>
+								onChange({
+									bracketId: brackets[0].id,
+									...source,
+									placements: e.target.value,
+								})
+							}
+						/>
+					</div>
+				) : null}
 			</div>
-			<div>
-				<Label htmlFor={createId("placements")}>Placements</Label>
-				<Input
-					id={createId("placements")}
-					placeholder="1,2,3"
-					value={source?.placements ?? ""}
-					testId="placements-input"
-					onChange={(e) =>
-						onChange({
-							bracketId: brackets[0].id,
-							...source,
-							placements: e.target.value,
-						})
-					}
-				/>
-			</div>
+			{!inputBracket?.settings.advanceThreshold ? (
+				<FormMessage type="info">
+					Use N+ for Nth place and every placement after
+				</FormMessage>
+			) : null}
 		</div>
 	);
 }
@@ -487,7 +641,10 @@ function ErrorMessage({ error }: { error: Progression.ValidationError }) {
 			{bracketIdxsArr ? (
 				<> (Bracket {bracketIdxsArr.map((idx) => `#${idx + 1}`).join(", ")})</>
 			) : null}
-			: {t(`tournament:progression.error.${error.type}`)}
+			:{" "}
+			{t(`tournament:progression.error.${error.type}`, {
+				max: TOURNAMENT.PLACEMENT_MAX,
+			})}
 		</FormMessage>
 	);
 }

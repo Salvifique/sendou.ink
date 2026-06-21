@@ -1,5 +1,5 @@
-import type { LoaderFunctionArgs } from "@remix-run/node";
-import { redirect } from "@remix-run/node";
+import type { LoaderFunctionArgs } from "react-router";
+import { redirect } from "react-router";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
 import { notFoundIfFalsy, parseParams } from "~/utils/remix.server";
 import { tournamentPage } from "~/utils/urls";
@@ -11,8 +11,7 @@ export const loader = async (args: LoaderFunctionArgs) => {
 		schema: idObject,
 	});
 	const event = notFoundIfFalsy(
-		await CalendarRepository.findById({
-			id: params.id,
+		await CalendarRepository.findById(params.id, {
 			includeBadgePrizes: true,
 			includeMapPool: true,
 		}),

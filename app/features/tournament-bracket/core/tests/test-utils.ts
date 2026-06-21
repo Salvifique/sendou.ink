@@ -15,15 +15,16 @@ export const tournamentCtxTeam = (
 		inviteCode: null,
 		avgSeedingSkillOrdinal: null,
 		startingBracketIdx: null,
+		abDivision: null,
 		team: null,
 		mapPool: [],
 		members: [],
 		activeRosterUserIds: [],
+		avatarImgId: null,
 		pickupAvatarUrl: null,
 		name: `Team ${teamId}`,
 		prefersNotToHost: 0,
 		droppedOut: 0,
-		noScreen: 0,
 		seed: teamId + 1,
 		...partial,
 	};
@@ -62,24 +63,24 @@ export const testTournament = ({
 			eventId: 1,
 			id: 1,
 			tags: null,
-			description: null,
 			organization: null,
+			tier: null,
+			tentativeTier: null,
 			parentTournamentId: null,
-			rules: null,
-			logoUrl: null,
-			logoSrc: "/test.png",
-			logoValidatedAt: null,
+			parentTournamentName: null,
+			hasRules: false,
+			logoUrl: "/test.avif",
 			discordUrl: null,
 			startTime: 1705858842,
 			isFinalized: 0,
 			name: "test",
 			castTwitchAccounts: [],
 			bracketProgressionOverrides: [],
-			subCounts: [],
 			staff: [],
 			tieBreakerMapPool: [],
 			toSetMapPool: [],
 			participatedUsers: [],
+			castStreams: [],
 			mapPickingStyle: "AUTO_SZ",
 			settings: {
 				bracketProgression: [
@@ -92,67 +93,20 @@ export const testTournament = ({
 				],
 			},
 			castedMatchesInfo: null,
+			seedingSnapshot: null,
 			teams: nTeams(participant.length, Math.min(...participant)),
 			author: {
-				chatNameColor: null,
 				customUrl: null,
+				customAvatarUrl: null,
 				discordAvatar: null,
 				discordId: "123",
 				username: "test",
+				pronouns: null,
 				id: 1,
 			},
 			...ctx,
 		},
 	});
-};
-
-export const adjustResults = (
-	data: TournamentManagerDataSet,
-	adjustedArr: Array<{
-		ids: [number, number];
-		score: [number, number];
-		points?: [number, number];
-	}>,
-): TournamentManagerDataSet => {
-	return {
-		...data,
-		match: data.match.map((match, idx) => {
-			const adjusted = adjustedArr[idx];
-			if (!adjusted) throw new Error(`No adjusted result for match ${idx}`);
-
-			if (adjusted.ids[0] !== match.opponent1!.id) {
-				throw new Error("Adjusted match opponent1 id does not match");
-			}
-
-			if (adjusted.ids[1] !== match.opponent2!.id) {
-				throw new Error("Adjusted match opponent2 id does not match");
-			}
-
-			return {
-				...match,
-				opponent1: {
-					...match.opponent1!,
-					score: adjusted.score[0],
-					result: adjusted.score[0] > adjusted.score[1] ? "win" : "loss",
-					totalPoints: adjusted.points
-						? adjusted.points[0]
-						: adjusted.score[0] > adjusted.score[1]
-							? 100
-							: 0,
-				},
-				opponent2: {
-					...match.opponent2!,
-					score: adjusted.score[1],
-					result: adjusted.score[1] > adjusted.score[0] ? "win" : "loss",
-					totalPoints: adjusted.points
-						? adjusted.points[1]
-						: adjusted.score[1] > adjusted.score[0]
-							? 100
-							: 0,
-				},
-			};
-		}),
-	};
 };
 
 const DEFAULT_PROGRESSION_ARGS = {
@@ -264,6 +218,26 @@ export const progressions = {
 			settings: {
 				groupCount: 1,
 			},
+		},
+	],
+	swissEarlyAdvance: [
+		{
+			...DEFAULT_PROGRESSION_ARGS,
+			type: "swiss",
+			settings: {
+				advanceThreshold: 3,
+			},
+		},
+		{
+			...DEFAULT_PROGRESSION_ARGS,
+			type: "single_elimination",
+			name: "B1",
+			sources: [
+				{
+					bracketIdx: 0,
+					placements: [],
+				},
+			],
 		},
 	],
 	doubleEliminationWithUnderground: [

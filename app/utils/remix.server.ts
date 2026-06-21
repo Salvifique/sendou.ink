@@ -1,17 +1,12 @@
-import {
-	unstable_composeUploadHandlers as composeUploadHandlers,
-	unstable_createMemoryUploadHandler as createMemoryUploadHandler,
-	json,
-	unstable_parseMultipartFormData as parseMultipartFormData,
-	redirect,
-} from "@remix-run/node";
-import type { Params, UIMatch } from "@remix-run/react";
+import type { FileUpload } from "@remix-run/form-data-parser";
+import { parseFormData as parseMultipartFormData } from "@remix-run/form-data-parser";
 import type { Namespace, TFunction } from "i18next";
-import { nanoid } from "nanoid";
-import type { z } from "zod/v4";
+import type { Ok, Result } from "neverthrow";
+import type { Params, UIMatch } from "react-router";
+import { data, redirect } from "react-router";
+import type { z } from "zod";
 import type { navItems } from "~/components/layout/nav-items";
-import { s3UploadHandler } from "~/features/img-upload";
-import invariant from "./invariant";
+import { ServerConfig } from "~/config.server";
 import { logger } from "./logger";
 
 export function notFoundIfFalsy<T>(value: T | null | undefined): T {
@@ -31,6 +26,11 @@ export function unauthorizedIfFalsy<T>(value: T | null | undefined): T {
 	if (!value) throw new Response(null, { status: 401 });
 
 	return value;
+}
+
+/** Throws a HTTP 403 (Forbidden) response, ending execution of the loader/action early */
+export function forbidden() {
+	throw new Response(null, { status: 403 });
 }
 
 export function badRequestIfFalsy<T>(value: T | null | undefined): T {
@@ -60,6 +60,28 @@ export function parseSearchParams<T extends z.ZodTypeAny>({
 	}
 }
 
+/**
+ * If the requested `page` exceeds `pagesCount`, throws a redirect to the last
+ * available page (preserving other search params). `pagesCount` is normalized
+ * to a minimum of 1 so empty result sets stay on page 1.
+ */
+export function redirectIfPageOutOfBounds({
+	url,
+	page,
+	pagesCount,
+}: {
+	url: URL;
+	page: number;
+	pagesCount: number;
+}): void {
+	const safePagesCount = Math.max(1, pagesCount);
+	if (page <= safePagesCount) return;
+
+	const searchParams = new URLSearchParams(url.searchParams);
+	searchParams.set("page", String(safePagesCount));
+	throw redirect(`${url.pathname}?${searchParams.toString()}`);
+}
+
 export function parseSafeSearchParams<T extends z.ZodTypeAny>({
 	request,
 	schema,
@@ -71,26 +93,24 @@ export function parseSafeSearchParams<T extends z.ZodTypeAny>({
 	return schema.safeParse(Object.fromEntries(url.searchParams));
 }
 
-/** Parse formData of a request with the given schema. Throws HTTP 400 response if fails. */
+/**
+ * Parse formData of a request with the given schema. Throws HTTP 400 response if fails.
+ *
+ * When using SendouForm, use parseFormData from /app/form/parse.server.ts instead.
+ * */
 export async function parseRequestPayload<T extends z.ZodTypeAny>({
 	request,
 	schema,
-	parseAsync,
 }: {
 	request: Request;
 	schema: T;
-	parseAsync?: boolean;
 }): Promise<z.infer<T>> {
 	const formDataObj =
 		request.headers.get("Content-Type") === "application/json"
 			? await request.json()
 			: formDataToObject(await request.formData());
 	try {
-		const parsed = parseAsync
-			? await schema.parseAsync(formDataObj)
-			: schema.parse(formDataObj);
-
-		return parsed;
+		return await schema.parseAsync(formDataObj);
 	} catch (e) {
 		logger.error("Error parsing request payload", e);
 
@@ -98,23 +118,21 @@ export async function parseRequestPayload<T extends z.ZodTypeAny>({
 	}
 }
 
-/** Parse formData with the given schema. Throws a request to show an error toast if it fails. */
+/**
+ * @deprecated - use parseFormData from /app/form/parse.server.ts (with SendouForm) or parseRequestPayload (without SendouForm)
+ *
+ * Parse formData with the given schema. Throws a request to show an error toast if it fails.
+ */
 export async function parseFormData<T extends z.ZodTypeAny>({
 	formData,
 	schema,
-	parseAsync,
 }: {
 	formData: FormData;
 	schema: T;
-	parseAsync?: boolean;
 }): Promise<z.infer<T>> {
 	const formDataObj = formDataToObject(formData);
 	try {
-		const parsed = parseAsync
-			? await schema.parseAsync(formDataObj)
-			: schema.parse(formDataObj);
-
-		return parsed;
+		return await schema.parseAsync(formDataObj);
 	} catch (e) {
 		logger.error("Error parsing form data", e);
 
@@ -133,6 +151,22 @@ export function parseParams<T extends z.ZodTypeAny>({
 	const parsed = schema.safeParse(params);
 	if (!parsed.success) {
 		throw new Response(null, { status: 404 });
+	}
+
+	return parsed.data;
+}
+
+/** Parse JSON body with the given schema. Throws HTTP 400 response if fails. */
+export async function parseBody<T extends z.ZodTypeAny>({
+	request,
+	schema,
+}: {
+	request: Request;
+	schema: T;
+}): Promise<z.infer<T>> {
+	const parsed = schema.safeParse(await request.json());
+	if (!parsed.success) {
+		throw new Response(null, { status: 400 });
 	}
 
 	return parsed.data;
@@ -165,7 +199,7 @@ export async function safeParseRequestFormData<T extends z.ZodTypeAny>({
 	};
 }
 
-function formDataToObject(formData: FormData) {
+export function formDataToObject(formData: FormData) {
 	const result: Record<string, string | string[]> = {};
 
 	for (const [key, value] of formData.entries()) {
@@ -188,13 +222,10 @@ const LOHI_TOKEN_HEADER_NAME = "Lohi-Token";
 
 /** Some endpoints can only be accessed with an auth token. Used by Lohi bot and cron jobs. */
 export function canAccessLohiEndpoint(request: Request) {
-	invariant(process.env.LOHI_TOKEN, "LOHI_TOKEN is required");
-	return request.headers.get(LOHI_TOKEN_HEADER_NAME) === process.env.LOHI_TOKEN;
+	return request.headers.get(LOHI_TOKEN_HEADER_NAME) === ServerConfig.lohiToken;
 }
 
-// TODO: investigate better solution to toasts when middlewares land (current one has a problem of clearing search params)
-
-export function errorToastRedirect(message: string) {
+function errorToastRedirect(message: string) {
 	return redirect(`?__error=${message}`);
 }
 
@@ -208,6 +239,19 @@ export function errorToastIfFalsy(
 	throw errorToastRedirect(message);
 }
 
+/**
+ * To be used in loader or action function. Asserts that the provided `Result` value is an `Ok` variant of the `neverthrow` library.
+ *
+ * If the value is an `Err`, shows an error toast to the user with the error message. The function will stop execution by throwing a redirect meaning it is safe to operate on the value after this function call.
+ */
+export function errorToastIfErr<T, E extends string>(
+	value: Result<T, E>,
+): asserts value is Ok<T, never> {
+	if (value.isErr()) {
+		throw errorToastRedirect(value.error);
+	}
+}
+
 /** Throws a redirect triggering an error toast with given message.  */
 export function errorToast(message: string) {
 	throw errorToastRedirect(message);
@@ -215,6 +259,16 @@ export function errorToast(message: string) {
 
 export function successToast(message: string) {
 	return redirect(`?__success=${message}`);
+}
+
+export function successToastWithRedirect({
+	message,
+	url,
+}: {
+	message: string;
+	url: string;
+}) {
+	return redirect(`${url}?__success=${message}`);
 }
 
 export type ActionError = { field: string; msg: string; isError: true };
@@ -235,7 +289,6 @@ export type Breadcrumb =
 			type: "IMAGE";
 			href: string;
 			text?: string;
-			rounded?: boolean;
 	  }
 	| { text: string; type: "TEXT"; href: string };
 
@@ -261,52 +314,73 @@ export type SendouRouteHandle = {
 
 	/** The name of a navItem that is active on this route. See nav-items.ts */
 	navItemName?: (typeof navItems)[number]["name"];
+
+	/**
+	 * When `true`, the shared `<Main>` rendered by a parent layout (e.g. the
+	 * tournament layout) fills the whole content area instead of the page
+	 * max-width, while the page content stays centered at the normal width.
+	 * Lets a descendant (e.g. the bracket) break out and grow wider than the
+	 * page when it needs to.
+	 */
+	mainBreakout?: boolean;
 };
 
 /** Caches the loader response with "private" Cache-Control meaning that CDN won't cache the response.
  * To be used when the response is different for each user. This is especially useful when the response
  * is prefetched on link hover.
  */
-export function privatelyCachedJson<T>(data: T) {
-	return json(data, {
+export function privatelyCachedJson<T>(dataValue: T) {
+	return data(dataValue, {
 		headers: { "Cache-Control": "private, max-age=5" },
 	});
 }
 
-export async function uploadImageIfSubmitted({
-	request,
-	fileNamePrefix,
-}: {
-	request: Request;
-	fileNamePrefix: string;
-}) {
-	const uploadHandler = composeUploadHandlers(
-		s3UploadHandler(`${fileNamePrefix}-${nanoid()}-${Date.now()}`),
-		createMemoryUploadHandler(),
-	);
+const DEFAULT_MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+type FileUploadHandler = (
+	fileUpload: FileUpload,
+) => Promise<string | null | undefined>;
+type ParseFormDataOptions = { maxFileSize?: number };
+
+export function safeParseMultipartFormData(
+	request: Request,
+	uploadHandler?: FileUploadHandler,
+): Promise<FormData>;
+export function safeParseMultipartFormData(
+	request: Request,
+	options?: ParseFormDataOptions,
+	uploadHandler?: FileUploadHandler,
+): Promise<FormData>;
+export async function safeParseMultipartFormData(
+	request: Request,
+	optionsOrHandler?: ParseFormDataOptions | FileUploadHandler,
+	uploadHandler?: FileUploadHandler,
+): Promise<FormData> {
+	const maxFileSize =
+		typeof optionsOrHandler === "object" && optionsOrHandler?.maxFileSize
+			? optionsOrHandler.maxFileSize
+			: DEFAULT_MAX_FILE_SIZE_BYTES;
 
 	try {
-		const formData = await parseMultipartFormData(request, uploadHandler);
-		const imgSrc = formData.get("img") as string | null;
-		invariant(imgSrc);
-
-		const urlParts = imgSrc.split("/");
-		const fileName = urlParts[urlParts.length - 1];
-		invariant(fileName);
-
-		return {
-			avatarFileName: fileName,
-			formData,
-		};
-	} catch (err) {
-		// user did not submit image
-		if (err instanceof TypeError) {
-			return {
-				avatarFileName: undefined,
-				formData: await request.formData(),
-			};
+		if (typeof optionsOrHandler === "function") {
+			return await parseMultipartFormData(request, optionsOrHandler);
 		}
-
+		return await parseMultipartFormData(
+			request,
+			optionsOrHandler,
+			uploadHandler,
+		);
+	} catch (err) {
+		if (
+			err instanceof Error &&
+			(err.name === "MaxFileSizeExceededError" ||
+				(err.cause instanceof Error &&
+					err.cause.name === "MaxFileSizeExceededError"))
+		) {
+			throw errorToastRedirect(
+				`File size exceeds maximum allowed size of ${maxFileSize / 1024 / 1024}MB`,
+			);
+		}
 		throw err;
 	}
 }

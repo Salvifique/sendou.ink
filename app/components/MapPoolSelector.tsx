@@ -1,10 +1,11 @@
 import clsx from "clsx";
+import { ArrowLeft, X } from "lucide-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Image } from "~/components/Image";
 import type { Tables } from "~/db/tables";
 import { MapPool } from "~/features/map-list-generator/core/map-pool";
-import { BANNED_MAPS } from "~/features/sendouq-settings/banned-maps";
+import { BANNED_MAPS } from "~/features/match-profile/banned-maps";
 import { modesShort } from "~/modules/in-game-lists/modes";
 import { stageIds } from "~/modules/in-game-lists/stage-ids";
 import type { ModeShort, StageId } from "~/modules/in-game-lists/types";
@@ -12,8 +13,6 @@ import { split, startsWith } from "~/utils/strings";
 import { assertType } from "~/utils/types";
 import { modeImageUrl, stageImageUrl } from "~/utils/urls";
 import { SendouButton } from "./elements/Button";
-import { ArrowLongLeftIcon } from "./icons/ArrowLongLeft";
-import { CrossIcon } from "./icons/Cross";
 
 import styles from "./MapPoolSelector.module.css";
 
@@ -104,12 +103,10 @@ export function MapPoolSelector({
 			)}
 			<div className="stack md">
 				{allowBulkEdit && (
-					<div className={styles.templateSelection}>
-						<MapPoolTemplateSelect
-							value={template}
-							handleChange={handleTemplateChange}
-						/>
-					</div>
+					<MapPoolTemplateSelect
+						value={template}
+						handleChange={handleTemplateChange}
+					/>
 				)}
 				{info}
 				<MapPoolStages
@@ -210,9 +207,9 @@ export function MapPoolStages({
 						width={80}
 						height={45}
 					/>
+					{/** biome-ignore lint/a11y/useSemanticElements: todo */}
 					<div
 						className={styles.stageNameRow}
-						// biome-ignore lint/a11y/useSemanticElements: todo
 						role="group"
 						aria-labelledby={`${id}-stage-name-${stageId}`}
 					>
@@ -252,7 +249,7 @@ export function MapPoolStages({
 									return (
 										<button
 											key={mode}
-											className={clsx(styles.modeButton, "outline-theme", {
+											className={clsx(styles.modeButton, {
 												[styles.selected]: selected,
 												[styles.preselected]: preselected,
 												invisible:
@@ -282,22 +279,20 @@ export function MapPoolStages({
 								allowBulkEdit &&
 								(mapPool.hasStage(stageId) ? (
 									<SendouButton
+										shape="circle"
 										key="clear"
 										onPress={() => handleStageClear(stageId)}
-										icon={<CrossIcon title={t("common:actions.remove")} />}
+										icon={<X />}
 										variant="minimal"
 										aria-label={t("common:actions.remove")}
 										size="small"
 									/>
 								) : (
 									<SendouButton
+										shape="circle"
 										key="select-all"
 										onPress={() => handleStageAdd(stageId)}
-										icon={
-											<ArrowLongLeftIcon
-												title={t("common:actions.selectAll")}
-											/>
-										}
+										icon={<ArrowLeft />}
 										variant="minimal"
 										aria-label={t("common:actions.selectAll")}
 										size="small"

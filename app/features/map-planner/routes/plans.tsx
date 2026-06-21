@@ -1,11 +1,12 @@
-import type { MetaFunction } from "@remix-run/node";
 import { lazy } from "react";
-import { useIsMounted } from "~/hooks/useIsMounted";
+import type { MetaFunction } from "react-router";
+import { Placeholder } from "~/components/Placeholder";
+import { useHydrated } from "~/hooks/useHydrated";
 import { metaTags } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import { navIconUrl, PLANNER_URL } from "~/utils/urls";
 
-import "../plans.css";
+import "../plans-global.css";
 
 export const meta: MetaFunction = (args) => {
 	return metaTags({
@@ -29,9 +30,9 @@ export const handle: SendouRouteHandle = {
 const Planner = lazy(() => import("~/features/map-planner/components/Planner"));
 
 export default function MapPlannerPage() {
-	const isMounted = useIsMounted();
+	const isHydrated = useHydrated();
 
-	if (!isMounted) return <div className="plans__placeholder" />;
+	if (!isHydrated) return <Placeholder />;
 
 	return <Planner />;
 }

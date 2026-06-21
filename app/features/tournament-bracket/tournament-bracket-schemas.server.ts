@@ -1,4 +1,5 @@
-import { z } from "zod/v4";
+import { z } from "zod";
+import { ACTION_TYPES, WHO_SIDES } from "~/db/tables";
 import {
 	_action,
 	checkboxValueToBoolean,
@@ -8,6 +9,7 @@ import {
 	numericEnum,
 	safeJSONParse,
 	stageId,
+	weaponSplId,
 } from "~/utils/zod";
 import { TOURNAMENT } from "../tournament/tournament-constants";
 import * as PickBan from "./core/PickBan";
@@ -40,15 +42,16 @@ const points = z.preprocess(
 				if (!val) return true;
 				const [p1, p2] = val;
 
-				if (p1 === p2) return false;
-				if (p1 === 100 && p2 !== 0) return false;
-				if (p2 === 100 && p1 !== 0) return false;
+				// KO
+				if (p1 === 100 && p2 === 0) return true;
+				if (p2 === 100 && p1 === 0) return true;
+				// ...or no points sent at all (TODO: if we decide that this KO only approach is solid then we can do a proper data model migration)
+				if (p1 === 0 && p2 === 0) return true;
 
-				return true;
+				return false;
 			},
 			{
-				message:
-					"Invalid points. Must not be equal & if one is 100, the other must be 0.",
+				message: "Invalid points. Valid: 100-0, 0-100 or 0-0.",
 			},
 		),
 );
@@ -66,8 +69,8 @@ export const matchSchema = z.union([
 	}),
 	z.object({
 		_action: _action("BAN_PICK"),
-		stageId,
-		mode: modeShort,
+		stageId: stageId.optional(),
+		mode: modeShort.optional(),
 	}),
 	z.object({
 		_action: _action("UNDO_REPORT_SCORE"),
@@ -91,13 +94,39 @@ export const matchSchema = z.union([
 	}),
 	z.object({
 		_action: _action("LOCK"),
+		twitchAccount: z.string().min(1).max(100),
 	}),
 	z.object({
 		_action: _action("UNLOCK"),
 	}),
+	z.object({
+		_action: _action("END_SET"),
+		winnerTeamId: z.preprocess(nullLiteraltoNull, id.nullable()),
+	}),
+	z.object({
+		_action: _action("REPORT_WEAPON"),
+		weaponSplId,
+		mapIndex: z.coerce.number().int().nonnegative(),
+	}),
+	z.object({
+		_action: _action("UNDO_WEAPON_REPORT"),
+		mapIndex: z.coerce.number().int().nonnegative(),
+	}),
 ]);
 
 export const bracketIdx = z.coerce.number().int().min(0).max(100);
+
+const customPickBanStep = z.object({
+	action: z.enum(ACTION_TYPES),
+	side: z.enum(WHO_SIDES).optional(),
+});
+
+const customPickBanFlow = z
+	.object({
+		preSet: z.array(customPickBanStep),
+		postGame: z.array(customPickBanStep),
+	})
+	.nullish();
 
 const tournamentRoundMaps = z.object({
 	roundId: z.number().int().min(0),
@@ -113,8 +142,8 @@ const tournamentRoundMaps = z.object({
 	count: numericEnum(TOURNAMENT.AVAILABLE_BEST_OF),
 	type: z.enum(["BEST_OF", "PLAY_ALL"]),
 	pickBan: z.enum(PickBan.types).nullish(),
+	customFlow: customPickBanFlow,
 });
-
 export const bracketSchema = z.union([
 	z.object({
 		_action: _action("START_BRACKET"),
@@ -146,9 +175,6 @@ export const bracketSchema = z.union([
 		bracketIdx,
 	}),
 	z.object({
-		_action: _action("FINALIZE_TOURNAMENT"),
-	}),
-	z.object({
 		_action: _action("BRACKET_CHECK_IN"),
 		bracketIdx,
 	}),
@@ -165,4 +191,18 @@ export const matchPageParamsSchema = z.object({ id, mid: id });
 export const tournamentTeamPageParamsSchema = z.object({
 	id,
 	tid: id,
+});
+
+export type TournamentBadgeReceivers = z.infer<typeof badgeReceivers>;
+
+const badgeReceivers = z.array(
+	z.object({
+		badgeId: id,
+		tournamentTeamId: id,
+		userIds: z.array(id).min(1).max(50),
+	}),
+);
+
+export const finalizeTournamentActionSchema = z.object({
+	badgeReceivers: z.preprocess(safeJSONParse, badgeReceivers.nullish()),
 });

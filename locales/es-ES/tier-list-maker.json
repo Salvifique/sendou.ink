@@ -1,0 +1,21 @@
+{
+	"addTier": "Añadir tier",
+	"download": "Descargar (.png)",
+	"mainWeapons": "Armas principales",
+	"subWeapons": "Armas secundarias",
+	"specialWeapons": "Armas especiales",
+	"stages": "Escenarios",
+	"modes": "Modos",
+	"stageModes": "Escenario + Modos",
+	"abilities": "",
+	"dropItems": "Suelta los elementos aquí",
+	"editingTier": "Editando tier",
+	"hideAltKits": "Ocultar kits alternativos",
+	"hideAltSkins": "Ocultar skins alternativas",
+	"resetConfirmation": "¿Seguro que quieres reiniciar la tier list? Esto eliminará todos los elementos y restaurará las tiers por defecto.",
+	"allowDuplicates": "Permitir duplicados",
+	"showTierHeaders": "Mostrar encabezados de las tiers",
+	"titlePlaceholder": "Haz clic para añadir un título...",
+	"by": "Creado por",
+	"custom": "Personalizado"
+}

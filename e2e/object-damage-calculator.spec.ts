@@ -1,6 +1,5 @@
-import { expect, test } from "@playwright/test";
-import { navigate, selectWeapon } from "~/utils/playwright";
 import { OBJECT_DAMAGE_CALCULATOR_URL } from "~/utils/urls";
+import { expect, navigate, selectWeapon, test } from "./helpers/playwright";
 
 test.describe("Object Damage Calculator", () => {
 	test.beforeEach(async ({ page }) => {

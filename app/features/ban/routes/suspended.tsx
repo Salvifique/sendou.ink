@@ -1,8 +1,10 @@
-import { useLoaderData } from "@remix-run/react";
+import { useLoaderData } from "react-router";
+import { LocaleTime } from "~/components/LocaleTime";
 import { Main } from "~/components/Main";
 import { databaseTimestampToDate } from "~/utils/dates";
 
 import { loader } from "../loaders/suspended.server";
+
 export { loader };
 
 export default function SuspendedPage() {
@@ -19,15 +21,19 @@ export default function SuspendedPage() {
 			<h2>Account suspended</h2>
 			{data.reason ? <div>Reason: {data.reason}</div> : null}
 			{ends ? (
-				<div suppressHydrationWarning>
+				<div>
 					Ends:{" "}
-					{ends.toLocaleString("en-US", {
-						month: "long",
-						day: "numeric",
-						year: "numeric",
-						hour: "numeric",
-						minute: "numeric",
-					})}
+					<LocaleTime
+						date={ends}
+						options={{
+							month: "numeric",
+							day: "numeric",
+							year: "numeric",
+							hour: "numeric",
+							minute: "numeric",
+						}}
+						inline
+					/>
 				</div>
 			) : (
 				<div>

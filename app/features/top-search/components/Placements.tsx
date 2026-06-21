@@ -1,5 +1,5 @@
-import { Link } from "@remix-run/react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { Image, WeaponImage } from "~/components/Image";
 import {
 	brandImageUrl,
@@ -7,11 +7,12 @@ import {
 	topSearchPage,
 	topSearchPlayerPage,
 } from "~/utils/urls";
-import type { FindPlacement } from "../queries/findPlacements.server";
+import styles from "../top-search.module.css";
 import { monthYearToSpan } from "../top-search-utils";
+import type * as XRankPlacementRepository from "../XRankPlacementRepository.server";
 
 interface PlacementsTableProps {
-	placements: Array<FindPlacement>;
+	placements: Array<XRankPlacementRepository.FindPlacement>;
 	type?: "PLAYER_NAME" | "MODE_INFO";
 }
 
@@ -25,7 +26,7 @@ export function PlacementsTable({
 	const { t } = useTranslation(["game-misc"]);
 
 	return (
-		<div className="placements__table">
+		<div className={styles.table}>
 			{placements.map((placement, i) => (
 				<Link
 					to={
@@ -34,14 +35,14 @@ export function PlacementsTable({
 							: topSearchPlayerPage(placement.playerId)
 					}
 					key={placement.id}
-					className="placements__table__row"
+					className={styles.tableRow}
 					data-testid={`placement-row-${i}`}
 				>
-					<div className="placements__table__inner-row">
-						<div className="placements__table__rank">{placement.rank}</div>
+					<div className={styles.tableInnerRow}>
+						<div className={styles.tableRank}>{placement.rank}</div>
 						{type === "MODE_INFO" ? (
 							<>
-								<div className="placements__table__mode">
+								<div className={styles.tableMode}>
 									<Image
 										alt={
 											placement.region === "WEST"
@@ -54,20 +55,22 @@ export function PlacementsTable({
 												: TAKOROKA_BRAND_ID,
 										)}
 										width={24}
+										height={24}
 									/>
 								</div>
 
-								<div className="placements__table__mode">
+								<div className={styles.tableMode}>
 									<Image
 										alt={t(`game-misc:MODE_LONG_${placement.mode}`)}
 										path={modeImageUrl(placement.mode)}
 										width={24}
+										height={24}
 									/>
 								</div>
 							</>
 						) : null}
 						<WeaponImage
-							className="placements__table__weapon"
+							className={styles.tableWeapon}
 							variant="build"
 							weaponSplId={placement.weaponSplId}
 							width={32}
@@ -75,7 +78,7 @@ export function PlacementsTable({
 						/>
 						{type === "PLAYER_NAME" ? <div>{placement.name}</div> : null}
 						{type === "MODE_INFO" ? (
-							<div className="placements__time">
+							<div className={styles.time}>
 								{monthYearToSpan(placement).from.month}/
 								{monthYearToSpan(placement).from.year} -{" "}
 								{monthYearToSpan(placement).to.month}/

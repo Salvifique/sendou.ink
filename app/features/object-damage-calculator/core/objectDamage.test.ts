@@ -3,8 +3,8 @@ import type {
 	AbilityPoints,
 	AnalyzedBuild,
 	DamageType,
-} from "~/features/build-analyzer";
-import { buildStats } from "~/features/build-analyzer";
+} from "~/features/build-analyzer/analyzer-types";
+import { buildStats } from "~/features/build-analyzer/core/stats";
 import type {
 	MainWeaponId,
 	SpecialWeaponId,
@@ -64,6 +64,7 @@ describe("calculateDamage()", () => {
 			});
 
 			for (const damage of analyzed.stats.damages) {
+				if (damage.type === "COMBO") continue;
 				calculate({ mainWeaponId, damageType: damage.type });
 			}
 		}
@@ -89,6 +90,7 @@ describe("calculateDamage()", () => {
 
 			for (const damage of analyzedWithSpecialWeapon.stats
 				.specialWeaponDamages) {
+				if (damage.type === "COMBO") continue;
 				calculate({
 					specialWeaponId,
 					damageType: damage.type,
@@ -107,6 +109,7 @@ describe("calculateDamage()", () => {
 		const hpWithoutBRU = withoutBRU.find(
 			(d) => d.receiver === "Wsb_Shield",
 		)?.hitPoints;
+		// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: Biome 2.3.1 upgrade
 		const hpWithBRU = withBRU.find((d) => d.receiver === "Wsb_Shield")
 			?.hitPoints!;
 
@@ -124,6 +127,7 @@ describe("calculateDamage()", () => {
 		const hpWithoutSPU = withoutSPU.find(
 			(d) => d.receiver === "GreatBarrier_Barrier",
 		)?.hitPoints;
+		// biome-ignore lint/suspicious/noNonNullAssertedOptionalChain: Biome 2.3.1 upgrade
 		const hpWithSPU = withSPU.find((d) => d.receiver === "GreatBarrier_Barrier")
 			?.hitPoints!;
 

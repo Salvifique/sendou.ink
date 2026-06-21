@@ -1,27 +1,17 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
-import { cors } from "remix-utils/cors";
-import { z } from "zod/v4";
+import type { LoaderFunctionArgs } from "react-router";
+import { z } from "zod";
 import { db } from "~/db/sql";
-import { HACKY_resolvePicture } from "~/features/tournament/tournament-utils";
 import { databaseTimestampToDate } from "~/utils/dates";
 import { notFoundIfFalsy, parseParams } from "~/utils/remix.server";
-import { userSubmittedImage } from "~/utils/urls";
 import { id } from "~/utils/zod";
-import {
-	handleOptionsRequest,
-	requireBearerAuth,
-} from "../api-public-utils.server";
 import type { GetTournamentResponse } from "../schema";
 
 const paramsSchema = z.object({
 	id,
 });
 
-export const loader = async ({ params, request }: LoaderFunctionArgs) => {
-	await handleOptionsRequest(request);
-	requireBearerAuth(request);
-
+export const loader = async ({ params }: LoaderFunctionArgs) => {
 	const { id } = parseParams({ params, schema: paramsSchema });
 
 	const tournament = notFoundIfFalsy(
@@ -61,7 +51,8 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 								.on("TournamentTeamCheckIn.bracketIdx", "is", null),
 						)
 						.select(["TournamentTeamCheckIn.checkedInAt"])
-						.where("TournamentTeam.tournamentId", "=", id),
+						.where("TournamentTeam.tournamentId", "=", id)
+						.where("TournamentTeam.isPlaceholder", "=", 0),
 				).as("teams"),
 			])
 			.where("Tournament.id", "=", id)
@@ -72,9 +63,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 		name: tournament.name,
 		startTime: databaseTimestampToDate(tournament.startTime).toISOString(),
 		url: `https://sendou.ink/to/${id}/brackets`,
-		logoUrl: tournament.logoUrl
-			? userSubmittedImage(tournament.logoUrl)
-			: `https://sendou.ink${HACKY_resolvePicture(tournament)}`,
+		logoUrl: tournament.logoUrl,
 		teams: {
 			checkedInCount: tournament.teams.filter((team) => team.checkedInAt)
 				.length,
@@ -88,5 +77,5 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
 		isFinalized: Boolean(tournament.isFinalized),
 	};
 
-	return await cors(request, json(result));
+	return Response.json(result);
 };

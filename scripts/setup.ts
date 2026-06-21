@@ -1,20 +1,12 @@
-import "dotenv/config";
-import fs from "node:fs";
 import { seed } from "~/db/seed";
 import { db } from "~/db/sql";
 import { logger } from "~/utils/logger";
+import { seedImages } from "./seed-images";
 
 async function main() {
-	// Step 1: Create .env if it doesn't exist
-	if (!fs.existsSync(".env")) {
-		logger.info("📄 .env not found. Creating from .env.example...");
-		fs.copyFileSync(".env.example", ".env");
-		logger.info(".env created with defaults values");
-	}
-
 	const dbEmpty = !(await db.selectFrom("User").selectAll().executeTakeFirst());
 
-	// Step 2: Run migration and seed if db.sqlite3 doesn't exist
+	// Run migration and seed if db.sqlite3 doesn't exist
 	if (dbEmpty) {
 		logger.info("🌱 Seeding database...");
 		try {
@@ -27,6 +19,14 @@ async function main() {
 			);
 			process.exit(1);
 		}
+	}
+
+	// Seed images to Minio
+	logger.info("🖼️  Seeding images to Minio...");
+	try {
+		await seedImages();
+	} catch (err) {
+		logger.error("Error seeding images:", (err as Error).message);
 	}
 }
 

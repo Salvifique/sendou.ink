@@ -1,6 +1,11 @@
 import clsx from "clsx";
+import { ChevronsUpDown, Search, X } from "lucide-react";
 import * as React from "react";
-import type { ListBoxItemProps, SelectProps } from "react-aria-components";
+import type {
+	AutocompleteProps,
+	ListBoxItemProps,
+	SelectProps,
+} from "react-aria-components";
 import {
 	Autocomplete,
 	Button,
@@ -22,10 +27,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { SendouBottomTexts } from "~/components/elements/BottomTexts";
 import { SendouButton } from "~/components/elements/Button";
-import { ChevronUpDownIcon } from "~/components/icons/ChevronUpDown";
 import { Image } from "../Image";
-import { CrossIcon } from "../icons/Cross";
-import { SearchIcon } from "../icons/Search";
 import styles from "./Select.module.css";
 
 export interface SendouSelectProps<T extends object>
@@ -45,6 +47,7 @@ export interface SendouSelectProps<T extends object>
 	/** Callback for when the search input value changes. When defined `items` has to be filtered on the caller side (automatic filtering in component disabled). */
 	onSearchInputChange?: (value: string) => void;
 	clearable?: boolean;
+	filter?: AutocompleteProps<object>["filter"];
 }
 
 /**
@@ -74,6 +77,7 @@ export function SendouSelect<T extends object>({
 	onSearchInputChange,
 	clearable = false,
 	className,
+	filter,
 	...props
 }: SendouSelectProps<T>) {
 	const { t } = useTranslation(["common"]);
@@ -89,55 +93,68 @@ export function SendouSelect<T extends object>({
 		}
 	};
 
+	const listBox = (
+		<Virtualizer layout={ListLayout} layoutOptions={{ rowHeight: 33 }}>
+			<ListBox
+				items={items}
+				className={clsx(styles.listBox, "scrollbar")}
+				renderEmptyState={() => (
+					<div className={styles.noResults}>{t("common:noResults")}</div>
+				)}
+			>
+				{children}
+			</ListBox>
+		</Virtualizer>
+	);
+
+	// The Autocomplete wrapper filters the collection, but its filtering drops
+	// items with a falsy key (e.g. `0`). When there is nothing to filter we skip
+	// it entirely so such items always render.
+	const filterable = !!search || isControlled || !!filter;
+
 	return (
 		<Select
 			{...props}
 			className={clsx(className, styles.select)}
 			onOpenChange={handleOpenChange}
 		>
-			{label ? <Label>{label}</Label> : null}
+			{label ? <Label className={styles.label}>{label}</Label> : null}
 			<Button className={styles.button}>
 				<SelectValue className={styles.selectValue} />
 				<span aria-hidden="true">
-					<ChevronUpDownIcon className={styles.icon} />
+					<ChevronsUpDown className={styles.icon} />
 				</span>
 			</Button>
 			{clearable ? <SelectClearButton /> : null}
 			<SendouBottomTexts bottomText={bottomText} errorText={errorText} />
 			<Popover className={clsx(popoverClassName, styles.popover)}>
-				<Autocomplete
-					filter={isControlled ? undefined : contains}
-					inputValue={searchInputValue}
-					onInputChange={onSearchInputChange}
-				>
-					{search ? (
-						<SearchField
-							aria-label="Search"
-							autoFocus
-							className={styles.searchField}
-						>
-							<SearchIcon aria-hidden className={styles.smallIcon} />
-							<Input
-								placeholder={search.placeholder}
-								className={clsx("plain", styles.searchInput)}
-							/>
-							<Button className={styles.searchClearButton}>
-								<CrossIcon className={styles.smallIcon} />
-							</Button>
-						</SearchField>
-					) : null}
-					<Virtualizer layout={ListLayout} layoutOptions={{ rowHeight: 33 }}>
-						<ListBox
-							items={items}
-							className={styles.listBox}
-							renderEmptyState={() => (
-								<div className={styles.noResults}>{t("common:noResults")}</div>
-							)}
-						>
-							{children}
-						</ListBox>
-					</Virtualizer>
-				</Autocomplete>
+				{filterable ? (
+					<Autocomplete
+						filter={filter ? filter : isControlled ? undefined : contains}
+						inputValue={searchInputValue}
+						onInputChange={onSearchInputChange}
+					>
+						{search ? (
+							<SearchField
+								aria-label="Search"
+								autoFocus
+								className={styles.searchField}
+							>
+								<Search aria-hidden className={styles.icon} />
+								<Input
+									placeholder={search.placeholder}
+									className={clsx(styles.searchInput, "in-container")}
+								/>
+								<Button className={styles.searchClearButton}>
+									<X className={styles.icon} />
+								</Button>
+							</SearchField>
+						) : null}
+						{listBox}
+					</Autocomplete>
+				) : (
+					listBox
+				)}
 			</Popover>
 		</Select>
 	);
@@ -197,7 +214,7 @@ function SelectClearButton() {
 			slot={null}
 			variant="minimal-destructive"
 			size="miniscule"
-			icon={<CrossIcon />}
+			icon={<X />}
 			onPress={() => state?.setSelectedKey(null)}
 			className={styles.clearButton}
 		>

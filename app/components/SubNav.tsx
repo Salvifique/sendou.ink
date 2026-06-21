@@ -1,20 +1,23 @@
-import type { LinkProps } from "@remix-run/react";
-import { NavLink } from "@remix-run/react";
 import clsx from "clsx";
 import type * as React from "react";
+import type { LinkProps } from "react-router";
+import { NavLink } from "react-router";
+import styles from "./SubNav.module.css";
 
 export function SubNav({
 	children,
 	secondary,
+	className,
 }: {
 	children: React.ReactNode;
 	secondary?: boolean;
+	className?: string;
 }) {
 	return (
 		<div>
 			<nav
-				className={clsx("sub-nav__container", {
-					"sub-nav__container__secondary": secondary,
+				className={clsx(styles.container, className, {
+					[styles.secondary]: secondary,
 				})}
 			>
 				{children}
@@ -41,8 +44,8 @@ export function SubNavLink({
 	return (
 		<NavLink
 			className={(state) =>
-				clsx("sub-nav__link__container", {
-					active: controlled ? active : state.isActive,
+				clsx(styles.linkContainer, {
+					[styles.active]: controlled ? active : state.isActive,
 					pending: state.isPending,
 				})
 			}
@@ -50,15 +53,15 @@ export function SubNavLink({
 			{...props}
 		>
 			<div
-				className={clsx("sub-nav__link", className, {
-					"sub-nav__link__secondary": secondary,
+				className={clsx(styles.link, className, {
+					[styles.linkSecondary]: secondary,
 				})}
 			>
 				{children}
 			</div>
 			<div
-				className={clsx("sub-nav__border-guy", {
-					"sub-nav__border-guy__secondary": secondary,
+				className={clsx(styles.borderGuy, {
+					[styles.borderGuySecondary]: secondary,
 				})}
 			/>
 		</NavLink>

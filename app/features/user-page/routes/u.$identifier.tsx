@@ -1,6 +1,6 @@
-import type { MetaFunction } from "@remix-run/node";
-import { Outlet, useLoaderData, useLocation } from "@remix-run/react";
 import { useTranslation } from "react-i18next";
+import type { MetaFunction } from "react-router";
+import { Outlet, useLoaderData, useLocation, useMatches } from "react-router";
 import { Main } from "~/components/Main";
 import { SubNav, SubNavLink } from "~/components/SubNav";
 import { useUser } from "~/features/auth/core/user";
@@ -8,8 +8,7 @@ import { useHasRole } from "~/modules/permissions/hooks";
 import { metaTags } from "~/utils/remix";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
-	navIconUrl,
-	USER_SEARCH_PAGE,
+	discordAvatarUrl,
 	userAdminPage,
 	userArtPage,
 	userBuildsPage,
@@ -19,14 +18,16 @@ import {
 	userSeasonsPage,
 	userVodsPage,
 } from "~/utils/urls";
+import type { UserPageNavItem } from "../components/UserPageIconNav";
 
 import {
 	loader,
 	type UserPageLoaderData,
 } from "../loaders/u.$identifier.server";
+
 export { loader };
 
-import "~/styles/u.css";
+import "~/features/user-page/user-page.module.css";
 
 export const meta: MetaFunction<typeof loader> = (args) => {
 	if (!args.data) return [];
@@ -39,24 +40,36 @@ export const meta: MetaFunction<typeof loader> = (args) => {
 };
 
 export const handle: SendouRouteHandle = {
-	i18n: ["user", "badges"],
+	i18n: ["user", "badges", "game-badges"],
 	breadcrumb: ({ match }) => {
 		const data = match.data as UserPageLoaderData | undefined;
 
 		if (!data) return [];
 
-		return [
-			{
-				imgPath: navIconUrl("u"),
-				href: USER_SEARCH_PAGE,
-				type: "IMAGE",
-			},
-			{
+		const imgPath = data.user.customAvatarUrl
+			? data.user.customAvatarUrl
+			: data.user.discordAvatar
+				? discordAvatarUrl({
+						discordId: data.user.discordId,
+						discordAvatar: data.user.discordAvatar,
+						size: "sm",
+					})
+				: null;
+
+		if (!imgPath) {
+			return {
 				text: data.user.username,
 				href: userPage(data.user),
 				type: "TEXT",
-			},
-		];
+			};
+		}
+
+		return {
+			imgPath,
+			href: userPage(data.user),
+			type: "IMAGE",
+			text: data.user.username,
+		};
 	},
 };
 
@@ -66,55 +79,133 @@ export default function UserPageLayout() {
 	const isStaff = useHasRole("STAFF");
 	const location = useLocation();
 	const { t } = useTranslation(["common", "user"]);
+	const matches = useMatches();
 
 	const isOwnPage = data.user.id === user?.id;
 
 	const allResultsCount =
 		data.user.calendarEventResultsCount + data.user.tournamentResultsCount;
 
+	const isNewUserPage = matches.some((m) => (m.data as any)?.type === "new");
+
+	const navItems: UserPageNavItem[] = [
+		{
+			to: userSeasonsPage({ user: data.user }),
+			iconName: "sendouq",
+			label: t("user:seasons"),
+			isVisible: true,
+			testId: "user-seasons-tab",
+		},
+		{
+			to: userResultsPage(data.user),
+			iconName: "medal",
+			label: t("common:results"),
+			count: allResultsCount,
+			isVisible: allResultsCount > 0,
+			testId: "user-results-tab",
+		},
+		{
+			to: userBuildsPage(data.user),
+			iconName: "builds",
+			label: t("common:pages.builds"),
+			count: data.user.buildsCount,
+			isVisible: data.user.buildsCount > 0 || isOwnPage,
+			testId: "user-builds-tab",
+			prefetch: "intent",
+		},
+		{
+			to: userVodsPage(data.user),
+			iconName: "vods",
+			label: t("common:pages.vods"),
+			count: data.user.vodsCount,
+			isVisible: data.user.vodsCount > 0 || isOwnPage,
+			testId: "user-vods-tab",
+		},
+		{
+			to: userArtPage(data.user),
+			iconName: "art",
+			label: t("common:pages.art"),
+			count: data.user.artCount,
+			isVisible: data.user.artCount > 0 || isOwnPage,
+			testId: "user-art-tab",
+			end: false,
+		},
+		{
+			to: userAdminPage(data.user),
+			iconName: "admin",
+			label: "Admin",
+			isVisible: isStaff,
+			testId: "user-admin-tab",
+		},
+	];
+
 	return (
 		<Main bigger={location.pathname.includes("results")}>
-			<SubNav>
-				<SubNavLink to={userPage(data.user)}>
-					{t("common:header.profile")}
-				</SubNavLink>
-				<SubNavLink to={userSeasonsPage({ user: data.user })}>
-					{t("user:seasons")}
-				</SubNavLink>
-				{isOwnPage && (
-					<SubNavLink to={userEditProfilePage(data.user)} prefetch="intent">
-						{t("common:actions.edit")}
+			{isNewUserPage ? null : (
+				<SubNav>
+					<SubNavLink to={userPage(data.user)} data-testid="user-profile-tab">
+						{t("common:header.profile")}
 					</SubNavLink>
-				)}
-				{allResultsCount > 0 && (
-					<SubNavLink to={userResultsPage(data.user)}>
-						{t("common:results")} ({allResultsCount})
-					</SubNavLink>
-				)}
-				{(data.user.buildsCount > 0 || isOwnPage) && (
 					<SubNavLink
-						to={userBuildsPage(data.user)}
-						prefetch="intent"
-						data-testid="builds-tab"
+						to={userSeasonsPage({ user: data.user })}
+						data-testid="user-seasons-tab"
 					>
-						{t("common:pages.builds")} ({data.user.buildsCount})
+						{t("user:seasons")}
 					</SubNavLink>
-				)}
-				{(data.user.vodsCount > 0 || isOwnPage) && (
-					<SubNavLink to={userVodsPage(data.user)}>
-						{t("common:pages.vods")} ({data.user.vodsCount})
-					</SubNavLink>
-				)}
-				{(data.user.artCount > 0 || isOwnPage) && (
-					<SubNavLink to={userArtPage(data.user)} end={false}>
-						{t("common:pages.art")} ({data.user.artCount})
-					</SubNavLink>
-				)}
-				{isStaff && (
-					<SubNavLink to={userAdminPage(data.user)}>Admin</SubNavLink>
-				)}
-			</SubNav>
-			<Outlet />
+					{isOwnPage ? (
+						<SubNavLink
+							to={userEditProfilePage(data.user)}
+							prefetch="intent"
+							data-testid="user-edit-tab"
+						>
+							{t("common:actions.edit")}
+						</SubNavLink>
+					) : null}
+					{allResultsCount > 0 ? (
+						<SubNavLink
+							to={userResultsPage(data.user)}
+							data-testid="user-results-tab"
+						>
+							{t("common:results")} ({allResultsCount})
+						</SubNavLink>
+					) : null}
+					{data.user.buildsCount > 0 || isOwnPage ? (
+						<SubNavLink
+							to={userBuildsPage(data.user)}
+							prefetch="intent"
+							data-testid="user-builds-tab"
+						>
+							{t("common:pages.builds")} ({data.user.buildsCount})
+						</SubNavLink>
+					) : null}
+					{data.user.vodsCount > 0 || isOwnPage ? (
+						<SubNavLink
+							to={userVodsPage(data.user)}
+							data-testid="user-vods-tab"
+						>
+							{t("common:pages.vods")} ({data.user.vodsCount})
+						</SubNavLink>
+					) : null}
+					{data.user.artCount > 0 || isOwnPage ? (
+						<SubNavLink
+							to={userArtPage(data.user)}
+							end={false}
+							data-testid="user-art-tab"
+						>
+							{t("common:pages.art")} ({data.user.artCount})
+						</SubNavLink>
+					) : null}
+					{isStaff ? (
+						<SubNavLink
+							to={userAdminPage(data.user)}
+							data-testid="user-admin-tab"
+						>
+							Admin
+						</SubNavLink>
+					) : null}
+				</SubNav>
+			)}
+			<Outlet context={{ navItems }} />
 		</Main>
 	);
 }

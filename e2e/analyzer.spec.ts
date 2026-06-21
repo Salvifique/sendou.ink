@@ -1,12 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { ANALYZER_URL } from "~/utils/urls";
 import {
+	expect,
 	impersonate,
 	isNotVisible,
 	navigate,
 	seed,
 	selectWeapon,
-} from "~/utils/playwright";
-import { ANALYZER_URL } from "~/utils/urls";
+	test,
+} from "./helpers/playwright";
 
 test.describe("Build Analyzer", () => {
 	test("analyzes a build and links to new build page with same abilities", async ({
@@ -41,7 +42,10 @@ test.describe("Build Analyzer", () => {
 		// on new build page with preselected values
 		await newBuildPrompt.click();
 		await expect(page.getByTestId("HEAD-gear-select")).toBeVisible();
-		await expect(page.getByTestId("weapon-0")).toContainText("Luna Blaster");
+		// Check that Luna Blaster appears in the weapon pool list (not in dropdown options)
+		await expect(
+			page.getByRole("listitem").getByText("Luna Blaster"),
+		).toBeVisible();
 		await page.getByTestId("SSU-ability").isVisible();
 	});
 
@@ -67,6 +71,11 @@ test.describe("Build Analyzer", () => {
 		await swimSpeedAbilityButtonLocator.click();
 		await expect(swimSpeedAbilityLocator).toBeVisible();
 		await swimSpeedAbilityButtonLocator.click();
+		await expect(
+			page.locator(
+				"[data-testid='ability-selector'] [data-testid='SSU-ability']",
+			),
+		).toHaveCount(2);
 
 		await page.getByTestId("ap-tab").click();
 		await expect(page.getByTestId("ap-compare-1").first()).toContainText(

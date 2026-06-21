@@ -1,14 +1,15 @@
-import test, { expect } from "@playwright/test";
 import { NZAP_TEST_ID } from "~/db/seed/constants";
 import { ADMIN_ID } from "~/features/admin/admin-constants";
+import { associationsPage, scrimsPage } from "~/utils/urls";
 import {
+	expect,
 	impersonate,
 	isNotVisible,
 	navigate,
 	seed,
 	submit,
-} from "~/utils/playwright";
-import { associationsPage, scrimsPage } from "~/utils/urls";
+	test,
+} from "./helpers/playwright";
 
 test.describe("Associations", () => {
 	test("creates a new association", async ({ page }) => {
@@ -19,7 +20,7 @@ test.describe("Associations", () => {
 			url: "/",
 		});
 
-		await page.getByTestId("anything-adder-menu-button").click();
+		await page.getByTestId("anything-adder-menu-button").first().click();
 		await page.getByTestId("menu-item-association").click();
 
 		await page.getByLabel("Name").fill("My Association");
@@ -42,7 +43,7 @@ test.describe("Associations", () => {
 		await expect(page.getByTestId("delete-association")).toHaveCount(2);
 
 		await page.getByTestId("delete-association").first().click();
-		await page.getByTestId("confirm-button").click();
+		await submit(page, "confirm-button");
 
 		await expect(page.getByTestId("delete-association")).toHaveCount(1);
 	});
@@ -63,13 +64,13 @@ test.describe("Associations", () => {
 		await impersonate(page, NZAP_TEST_ID);
 		await navigate({
 			page,
-			url: inviteLink.replace("https://sendou.ink", "http://localhost:5173"),
+			url: inviteLink.replace("https://sendou.ink", "http://localhost:6173"),
 		});
 
 		await submit(page);
 
 		await page.getByTestId("leave-team-button").click();
-		await page.getByTestId("confirm-button").click();
+		await submit(page, "confirm-button");
 
 		await isNotVisible(page.getByTestId("leave-team-button"));
 	});

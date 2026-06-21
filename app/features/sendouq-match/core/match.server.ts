@@ -1,149 +1,231 @@
 import * as R from "remeda";
 import type { ParsedMemento, UserMapModePreferences } from "~/db/tables";
+import * as MapList from "~/features/map-list-generator/core/MapList";
+import { MapPool } from "~/features/map-list-generator/core/map-pool";
 import {
-	type DbMapPoolList,
-	MapPool,
-} from "~/features/map-list-generator/core/map-pool";
+	BANNED_MAPS,
+	SENDOUQ_MAP_POOL,
+} from "~/features/match-profile/banned-maps";
 import * as Seasons from "~/features/mmr/core/Seasons";
 import { userSkills } from "~/features/mmr/tiered.server";
-import { addSkillsToGroups } from "~/features/sendouq/core/groups.server";
+import { getDefaultMapWeights } from "~/features/sendouq/core/default-maps.server";
+import type {
+	SQMatch,
+	SQUncensoredGroup,
+} from "~/features/sendouq/core/SendouQ.server";
 import { SENDOUQ_BEST_OF } from "~/features/sendouq/q-constants";
-import type { LookingGroupWithInviteCode } from "~/features/sendouq/q-types";
-import { BANNED_MAPS } from "~/features/sendouq-settings/banned-maps";
 import { modesShort } from "~/modules/in-game-lists/modes";
-import type { ModeShort, StageId } from "~/modules/in-game-lists/types";
-import {
-	createTournamentMapList,
-	type TournamentMapListMap,
-} from "~/modules/tournament-map-list-generator";
-import { SENDOUQ_DEFAULT_MAPS } from "~/modules/tournament-map-list-generator/constants";
-import invariant from "~/utils/invariant";
+import type { ModeShort, ModeWithStage } from "~/modules/in-game-lists/types";
+import type {
+	TournamentMapListMap,
+	TournamentMaplistSource,
+} from "~/modules/tournament-map-list-generator/types";
 import { logger } from "~/utils/logger";
 import { averageArray } from "~/utils/number";
-import type { MatchById } from "../queries/findMatchById.server";
 
-export function matchMapList(
+type WeightsMap = Map<string, number>;
+
+async function calculateMapWeights(
+	groupOnePreferences: UserMapModePreferences[],
+	groupTwoPreferences: UserMapModePreferences[],
+	modesIncluded: readonly ModeShort[],
+): Promise<WeightsMap> {
+	const teamOneVotes: WeightsMap = new Map();
+	const teamTwoVotes: WeightsMap = new Map();
+
+	countVotesForTeam(modesIncluded, groupOnePreferences, teamOneVotes);
+	countVotesForTeam(modesIncluded, groupTwoPreferences, teamTwoVotes);
+
+	const applyWeightFormula = (voteCount: number) =>
+		// 1, 4 or 9 (cap)
+		Math.min(voteCount * voteCount, 9);
+
+	const teamOneWeights: WeightsMap = new Map();
+	const teamTwoWeights: WeightsMap = new Map();
+
+	for (const [key, votes] of teamOneVotes) {
+		teamOneWeights.set(key, applyWeightFormula(votes));
+	}
+	for (const [key, votes] of teamTwoVotes) {
+		teamTwoWeights.set(key, applyWeightFormula(votes));
+	}
+
+	const combinedWeights = normalizeAndCombineWeights(
+		teamOneWeights,
+		teamTwoWeights,
+	);
+
+	return applyDefaultWeights(combinedWeights);
+}
+
+/**
+ * Normalizes and combines map weights from two teams.
+ *
+ * When both teams have weights, team one's weights are normalized to match
+ * team two's total before combining. This ensures fair weighting when teams
+ * have different numbers of preferences.
+ *
+ * @returns Combined weights map with all keys from both teams
+ */
+export function normalizeAndCombineWeights(
+	teamOneWeights: Map<string, number>,
+	teamTwoWeights: Map<string, number>,
+): Map<string, number> {
+	const teamOneTotal = Array.from(teamOneWeights.values()).reduce(
+		(sum, w) => sum + w,
+		0,
+	);
+	const teamTwoTotal = Array.from(teamTwoWeights.values()).reduce(
+		(sum, w) => sum + w,
+		0,
+	);
+
+	const combinedWeights = new Map<string, number>();
+	const allKeys = new Set([...teamOneWeights.keys(), ...teamTwoWeights.keys()]);
+
+	for (const key of allKeys) {
+		const teamOneWeight = teamOneWeights.get(key) ?? 0;
+		const teamTwoWeight = teamTwoWeights.get(key) ?? 0;
+
+		if (teamOneTotal > 0 && teamTwoTotal > 0) {
+			const normalizedTeamOne = (teamOneWeight / teamOneTotal) * teamTwoTotal;
+			combinedWeights.set(key, normalizedTeamOne + teamTwoWeight);
+		} else {
+			combinedWeights.set(key, teamOneWeight + teamTwoWeight);
+		}
+	}
+
+	return combinedWeights;
+}
+
+/**
+ * Applies default map weights to combined weights for any maps not already weighted.
+ *
+ * Fetches global default weights and adds them to the combined weights map for any
+ * map-mode combinations that don't already have weights. This ensures the pool always
+ * has a baseline selection of maps.
+ *
+ * @returns Combined weights with defaults applied
+ */
+async function applyDefaultWeights(
+	combinedWeights: WeightsMap,
+): Promise<WeightsMap> {
+	let defaultWeights: WeightsMap;
+	try {
+		defaultWeights = await getDefaultMapWeights();
+	} catch (err) {
+		logger.error(
+			`[calculateMapWeights] Failed to get default map weights: ${err}`,
+		);
+		defaultWeights = new Map();
+	}
+
+	for (const [key, weight] of defaultWeights) {
+		if (!combinedWeights.has(key)) {
+			combinedWeights.set(key, weight);
+		}
+	}
+
+	return combinedWeights;
+}
+
+function countVotesForTeam(
+	modesIncluded: readonly ModeShort[],
+	preferences: UserMapModePreferences[],
+	votesMap: WeightsMap,
+) {
+	for (const preference of preferences) {
+		for (const poolEntry of preference.pool) {
+			if (!modesIncluded.includes(poolEntry.mode)) continue;
+
+			const avoidedMode = preference.modes.find(
+				(m) => m.mode === poolEntry.mode && m.preference === "AVOID",
+			);
+			if (avoidedMode) continue;
+
+			for (const stageId of poolEntry.stages) {
+				if (BANNED_MAPS[poolEntry.mode].includes(stageId)) continue;
+
+				votesMap.set(
+					MapList.modeStageKey(poolEntry.mode, stageId),
+					(votesMap.get(MapList.modeStageKey(poolEntry.mode, stageId)) ?? 0) +
+						1,
+				);
+			}
+		}
+	}
+}
+
+export async function matchMapList(
 	groupOne: {
 		preferences: { userId: number; preferences: UserMapModePreferences }[];
 		id: number;
-		ignoreModePreferences?: boolean;
 	},
 	groupTwo: {
 		preferences: { userId: number; preferences: UserMapModePreferences }[];
 		id: number;
-		ignoreModePreferences?: boolean;
 	},
-) {
-	const modesIncluded = mapModePreferencesToModeList(
-		groupOne.ignoreModePreferences
-			? []
-			: groupOne.preferences.map(({ preferences }) => preferences.modes),
-		groupTwo.ignoreModePreferences
-			? []
-			: groupTwo.preferences.map(({ preferences }) => preferences.modes),
+	modesIncluded: readonly ModeShort[],
+): Promise<TournamentMapListMap[]> {
+	const weights = await calculateMapWeights(
+		groupOne.preferences.map((p) => p.preferences),
+		groupTwo.preferences.map((p) => p.preferences),
+		modesIncluded,
 	);
 
-	try {
-		return createTournamentMapList({
-			count: SENDOUQ_BEST_OF,
-			seed: String(groupOne.id),
-			modesIncluded,
-			tiebreakerMaps: new MapPool([]),
-			followModeOrder: true,
-			teams: [
-				{
-					id: groupOne.id,
-					maps: mapLottery(
-						groupOne.preferences.map((p) => p.preferences),
-						modesIncluded,
-					),
-				},
-				{
-					id: groupTwo.id,
-					maps: mapLottery(
-						groupTwo.preferences.map((p) => p.preferences),
-						modesIncluded,
-					),
-				},
-			],
-		});
-		// in rare cases, the map list generator can fail
-		// in that case, just return a map list from our default set of maps
-	} catch (e) {
-		logger.error(e);
-		return createTournamentMapList({
-			count: SENDOUQ_BEST_OF,
-			seed: String(groupOne.id),
-			modesIncluded,
-			tiebreakerMaps: new MapPool([]),
-			teams: [
-				{
-					id: groupOne.id,
-					maps: new MapPool([]),
-				},
-				{
-					id: groupTwo.id,
-					maps: new MapPool([]),
-				},
-			],
-		});
-	}
-}
+	logger.info(
+		`[matchMapList] Generated map weights: ${JSON.stringify(
+			Array.from(weights.entries()),
+		)}`,
+	);
 
-const MAPS_PER_MODE = 7;
+	const generator = MapList.generate({
+		mapPool: new MapPool(
+			SENDOUQ_MAP_POOL.stageModePairs.filter((pair) =>
+				modesIncluded.includes(pair.mode),
+			),
+		),
+		initialWeights: weights,
+		skipEnsureMinimumCandidates: true,
+	});
+	generator.next();
 
-export function mapLottery(
-	preferences: UserMapModePreferences[],
-	modes: ModeShort[],
-) {
-	invariant(modes.length > 0, "mapLottery: no modes");
+	const maps = generator.next({ amount: SENDOUQ_BEST_OF }).value;
 
-	const mapPoolList: DbMapPoolList = [];
-
-	for (const mode of modes) {
-		const stageIdsFromPools = R.shuffle(
-			preferences.flatMap((preference) => {
-				// if they disliked the mode don't include their maps
-				// they are just saved in the DB so they can be restored later
-				if (
-					preference.modes.find((mp) => mp.mode === mode)?.preference ===
-					"AVOID"
-				) {
-					return [];
-				}
-
-				return preference.pool.find((pool) => pool.mode === mode)?.stages ?? [];
-			}),
+	const resolveSource = (map: ModeWithStage): TournamentMaplistSource => {
+		const groupOnePrefers = groupOne.preferences.some((p) =>
+			p.preferences.pool.some(
+				(pool) => pool.mode === map.mode && pool.stages.includes(map.stageId),
+			),
+		);
+		const groupTwoPrefers = groupTwo.preferences.some((p) =>
+			p.preferences.pool.some(
+				(pool) => pool.mode === map.mode && pool.stages.includes(map.stageId),
+			),
 		);
 
-		const modeStageIdsForMatch: StageId[] = [];
-		for (const stageId of stageIdsFromPools) {
-			if (modeStageIdsForMatch.length === MAPS_PER_MODE) break;
-			if (
-				modeStageIdsForMatch.includes(stageId) ||
-				BANNED_MAPS[mode].includes(stageId)
-			) {
-				continue;
-			}
-
-			modeStageIdsForMatch.push(stageId);
+		if (groupOnePrefers && groupTwoPrefers) {
+			return "BOTH";
+		}
+		if (groupOnePrefers) {
+			return groupOne.id;
+		}
+		if (groupTwoPrefers) {
+			return groupTwo.id;
 		}
 
-		if (modeStageIdsForMatch.length === MAPS_PER_MODE) {
-			for (const stageId of modeStageIdsForMatch) {
-				mapPoolList.push({ mode, stageId });
-			}
-			// this should only happen if they made no map picks at all yet
-			// as when everyone avoids a mode it can't appear
-			// and if they select mode as neutral/prefer you need to pick 7 maps
-		} else {
-			mapPoolList.push(
-				...SENDOUQ_DEFAULT_MAPS[mode].map((stageId) => ({ mode, stageId })),
-			);
-		}
+		return "DEFAULT";
+	};
+
+	const result = maps.map((map) => ({ ...map, source: resolveSource(map) }));
+
+	if (result.some((m) => m.source === "DEFAULT")) {
+		logger.info(
+			`[matchMapList] Some maps were selected from DEFAULT source. groupOne: ${JSON.stringify(groupOne)}, groupTwo: ${JSON.stringify(groupTwo)}`,
+		);
 	}
 
-	return new MapPool(mapPoolList);
+	return result;
 }
 
 export function mapModePreferencesToModeList(
@@ -221,13 +303,18 @@ export function compareMatchToReportedScores({
 	newReporterGroupId,
 	previousReporterGroupId,
 }: {
-	match: MatchById;
+	match: Pick<SQMatch, "mapList"> & {
+		groupAlpha: { id: number };
+		groupBravo: { id: number };
+	};
 	winners: ("ALPHA" | "BRAVO")[];
 	newReporterGroupId: number;
 	previousReporterGroupId?: number;
 }) {
 	// match has not been reported before
-	if (!match.reportedByUserId) return "FIRST_REPORT";
+	if (!match.mapList.some((m) => m.reportedByUserId !== null)) {
+		return "FIRST_REPORT";
+	}
 
 	const sameGroupReporting = newReporterGroupId === previousReporterGroupId;
 	const differentConstant = sameGroupReporting ? "FIX_PREVIOUS" : "DIFFERENT";
@@ -251,7 +338,7 @@ export function compareMatchToReportedScores({
 		if (newWinner && !previousWinnerGroupId) return differentConstant;
 
 		const previousWinner =
-			previousWinnerGroupId === match.alphaGroupId ? "ALPHA" : "BRAVO";
+			previousWinnerGroupId === match.groupAlpha.id ? "ALPHA" : "BRAVO";
 
 		if (previousWinner !== newWinner) return differentConstant;
 	}
@@ -262,14 +349,19 @@ export function compareMatchToReportedScores({
 	return "SAME";
 }
 
+type GroupPreference = {
+	userId: number;
+	preferences: UserMapModePreferences;
+	teamName?: string | null;
+};
 type CreateMatchMementoArgs = {
 	own: {
-		group: LookingGroupWithInviteCode;
-		preferences: { userId: number; preferences: UserMapModePreferences }[];
+		group: SQUncensoredGroup;
+		preferences: GroupPreference[];
 	};
 	their: {
-		group: LookingGroupWithInviteCode;
-		preferences: { userId: number; preferences: UserMapModePreferences }[];
+		group: SQUncensoredGroup;
+		preferences: GroupPreference[];
 	};
 	mapList: TournamentMapListMap[];
 };
@@ -277,17 +369,9 @@ export function createMatchMemento(
 	args: CreateMatchMementoArgs,
 ): Omit<ParsedMemento, "mapPreferences"> {
 	const skills = userSkills(Seasons.currentOrPrevious()!.nth);
-	const withTiers = addSkillsToGroups({
-		groups: {
-			neutral: [],
-			likesReceived: [args.their.group],
-			own: args.own.group,
-		},
-		...skills,
-	});
 
-	const ownWithTier = withTiers.own;
-	const theirWithTier = withTiers.likesReceived[0];
+	const ownWithTier = args.own.group;
+	const theirWithTier = args.their.group;
 
 	return {
 		modePreferences: modePreferencesMemento(args),
@@ -310,7 +394,7 @@ export function createMatchMemento(
 			[ownWithTier, theirWithTier].map((group) => [
 				group!.id,
 				{
-					tier: group!.tier,
+					tier: group!.tier!,
 				},
 			]),
 		),
@@ -363,6 +447,7 @@ function poolsMemento(args: CreateMatchMementoArgs): ParsedMemento["pools"] {
 		return {
 			userId: p.userId,
 			pool,
+			...(p.teamName ? { teamName: p.teamName } : {}),
 		};
 	});
 }

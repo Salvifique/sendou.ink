@@ -1,0 +1,277 @@
+import clsx from "clsx";
+import { differenceInMinutes, differenceInSeconds } from "date-fns";
+import * as React from "react";
+import { useTranslation } from "react-i18next";
+import { useLoaderData } from "react-router";
+import {
+	SendouChipRadio,
+	SendouChipRadioGroup,
+} from "~/components/elements/ChipRadio";
+import { ModeImage, StageImage } from "~/components/Image";
+import { useDateTimeFormat } from "~/hooks/intl/useDateTimeFormat";
+import { useFormatDistanceToNow } from "~/hooks/intl/useFormatDistanceToNow";
+import { shortStageName } from "~/modules/in-game-lists/stage-ids";
+import type { RankedModeShort, StageId } from "~/modules/in-game-lists/types";
+import {
+	databaseTimestampToDate,
+	dateToDatabaseTimestamp,
+} from "~/utils/dates";
+import { SPLATOON_3_INK } from "~/utils/urls";
+import type { FrontPageLoaderData, loader } from "../loaders/index.server";
+import styles from "./SplatoonRotations.module.css";
+
+const ROTATION_MODE_FILTERS = ["ALL", "SZ", "TC", "RM", "CB"] as const;
+type RotationModeFilter = (typeof ROTATION_MODE_FILTERS)[number];
+
+const ROTATION_TYPE_LABELS: Record<string, string> = {
+	SERIES: "rotations.series",
+	OPEN: "rotations.open",
+	X: "rotations.x",
+};
+
+type RotationFromLoader = FrontPageLoaderData["rotations"][number];
+
+const TYPE_ORDER = ["X", "SERIES", "OPEN"];
+
+const RELATIVE_TIME_CUTOFF_MINUTES = 120;
+
+export function SplatoonRotations() {
+	const { t } = useTranslation(["front"]);
+	const data = useLoaderData<typeof loader>();
+	const [activeFilter, setActiveFilter] =
+		React.useState<RotationModeFilter>("ALL");
+
+	const nowUnixLive = useNowUnix(data.now);
+
+	const allInThePast = data.rotations.every(
+		(rotation) => rotation.endTime <= nowUnixLive,
+	);
+	if (allInThePast) return null;
+
+	if (allInThePast || data.rotations.length === 0) return null;
+
+	const rotationsByType = new Map<
+		string,
+		{
+			current: RotationFromLoader | undefined;
+			next: RotationFromLoader | undefined;
+			nextAfter: RotationFromLoader | undefined;
+		}
+	>();
+
+	for (const rotation of data.rotations) {
+		if (activeFilter !== "ALL" && rotation.mode !== activeFilter) continue;
+
+		const isCurrent =
+			rotation.startTime <= nowUnixLive && rotation.endTime > nowUnixLive;
+		const isNext = rotation.startTime > nowUnixLive;
+
+		if (!isCurrent && !isNext) continue;
+
+		const existing = rotationsByType.get(rotation.type) ?? {
+			current: undefined,
+			next: undefined,
+			nextAfter: undefined,
+		};
+
+		if (isCurrent && !existing.current) {
+			existing.current = rotation;
+		}
+		if (isNext && !existing.next) {
+			existing.next = rotation;
+		} else if (isNext && existing.next && !existing.nextAfter) {
+			existing.nextAfter = rotation;
+		}
+
+		rotationsByType.set(rotation.type, existing);
+	}
+
+	const sortedEntries = Array.from(rotationsByType.entries()).sort(
+		(a, b) => TYPE_ORDER.indexOf(a[0]) - TYPE_ORDER.indexOf(b[0]),
+	);
+
+	return (
+		<div className={styles.rotationsContainer}>
+			<div className={clsx(styles.rotationsScroll, "scrollbar")}>
+				{sortedEntries.map(([type, { current, next, nextAfter }]) =>
+					current || next ? (
+						<RotationCard
+							key={type}
+							type={type}
+							current={current}
+							next={next}
+							nextAfter={nextAfter}
+							now={databaseTimestampToDate(nowUnixLive)}
+						/>
+					) : null,
+				)}
+			</div>
+			<div className={styles.rotationsFooter}>
+				<SendouChipRadioGroup>
+					{ROTATION_MODE_FILTERS.map((filter) => (
+						<SendouChipRadio
+							key={filter}
+							name="rotation-mode-filter"
+							value={filter}
+							checked={activeFilter === filter}
+							onChange={(val) => setActiveFilter(val as RotationModeFilter)}
+						>
+							{filter === "ALL" ? t("front:rotations.filter.all") : filter}
+						</SendouChipRadio>
+					))}
+				</SendouChipRadioGroup>
+				<span className={styles.rotationsCredit}>
+					<a href={SPLATOON_3_INK} target="_blank" rel="noopener noreferrer">
+						{t("front:rotations.credit")}
+					</a>
+				</span>
+			</div>
+		</div>
+	);
+}
+
+function useNowUnix(initialNow: number) {
+	const [now, setNow] = React.useState(initialNow);
+
+	React.useEffect(() => {
+		setNow(dateToDatabaseTimestamp(new Date()));
+		const interval = setInterval(() => {
+			setNow(dateToDatabaseTimestamp(new Date()));
+		}, 60_000);
+		return () => clearInterval(interval);
+	}, []);
+
+	return now;
+}
+
+function rotationProgress(now: Date, start: Date, end: Date) {
+	const remainingSeconds = differenceInSeconds(end, now);
+	if (remainingSeconds <= 0) return null;
+
+	const totalSeconds = differenceInSeconds(end, start);
+	const elapsedSeconds = differenceInSeconds(now, start);
+	return totalSeconds > 0
+		? Math.min(1, Math.max(0, elapsedSeconds / totalSeconds))
+		: 0;
+}
+
+function RotationCard({
+	type,
+	current,
+	next,
+	nextAfter,
+	now,
+}: {
+	type: string;
+	current: RotationFromLoader | undefined;
+	next: RotationFromLoader | undefined;
+	nextAfter: RotationFromLoader | undefined;
+	now: Date;
+}) {
+	const { t } = useTranslation(["front", "game-misc"]);
+	const formatDistanceToNow = useFormatDistanceToNow();
+	const progress = current
+		? rotationProgress(
+				now,
+				databaseTimestampToDate(current.startTime),
+				databaseTimestampToDate(current.endTime),
+			)
+		: null;
+	const displayRotation = current ?? next;
+	const shownNext = current ? next : nextAfter;
+
+	if (!displayRotation) return null;
+
+	return (
+		<div className={styles.rotationCard}>
+			<div className={styles.rotationCardType}>
+				<ModeImage mode={displayRotation.mode as RankedModeShort} width={20} />
+				{t(`front:${ROTATION_TYPE_LABELS[type]}` as any)}
+			</div>
+			{current && progress !== null ? (
+				<div className={styles.rotationCardProgress}>
+					<div
+						className={styles.rotationCardProgressBar}
+						style={{ width: `${progress * 100}%` }}
+					/>
+					<span className={styles.rotationCardProgressText}>
+						{formatDistanceToNow(current.endTime)}
+					</span>
+				</div>
+			) : null}
+			{!current && next ? (
+				<div
+					className={clsx(
+						styles.rotationCardProgress,
+						styles.rotationCardProgressStriped,
+					)}
+				>
+					<span className={styles.rotationCardProgressText}>
+						<NextLabel
+							startTime={databaseTimestampToDate(next.startTime)}
+							now={now}
+						/>
+					</span>
+				</div>
+			) : null}
+			<div className={styles.rotationCardStages}>
+				<StageImage
+					stageId={displayRotation.stageId1 as StageId}
+					className={styles.rotationCardStageImage}
+					height={64}
+				/>
+				<StageImage
+					stageId={displayRotation.stageId2 as StageId}
+					className={styles.rotationCardStageImage}
+					height={64}
+				/>
+			</div>
+			<div className={styles.rotationCardNext}>
+				{shownNext ? (
+					<div className={styles.rotationCardNextInfo}>
+						{current && shownNext.startTime === current.endTime ? (
+							t("front:rotations.nextLabel")
+						) : (
+							<NextLabel
+								startTime={databaseTimestampToDate(shownNext.startTime)}
+								now={now}
+								compact
+							/>
+						)}
+						<ModeImage mode={shownNext.mode as RankedModeShort} width={16} />{" "}
+						{shortStageName(t(`game-misc:STAGE_${shownNext.stageId1}` as any))},{" "}
+						{shortStageName(t(`game-misc:STAGE_${shownNext.stageId2}` as any))}
+					</div>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+function NextLabel({
+	startTime,
+	now,
+	compact,
+}: {
+	startTime: Date;
+	now: Date;
+	compact?: boolean;
+}) {
+	const { t } = useTranslation(["front"]);
+	const { formatter: timeFormatter } = useDateTimeFormat({
+		hour: "numeric",
+		minute: "numeric",
+	});
+	const formatDistanceToNow = useFormatDistanceToNow();
+
+	const minutesUntilStart = differenceInMinutes(startTime, now);
+	if (minutesUntilStart <= 0) return null;
+
+	const withinCutoff = minutesUntilStart <= RELATIVE_TIME_CUTOFF_MINUTES;
+	const relativeText = withinCutoff
+		? formatDistanceToNow(startTime, { addSuffix: true })
+		: timeFormatter.format(startTime);
+
+	if (compact) return relativeText;
+	return `${t("front:rotations.nextLabel")} (${relativeText})`;
+}

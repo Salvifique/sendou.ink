@@ -1,9 +1,11 @@
+import type { Namespace, TFunction } from "i18next";
+import type {
+	AnyWeapon,
+	DamageType,
+} from "~/features/build-analyzer/analyzer-types";
 import type { MainWeaponId } from "~/modules/in-game-lists/types";
-import { mainWeaponIds } from "~/modules/in-game-lists/weapon-ids";
-import invariant from "~/utils/invariant";
-import type { AnyWeapon, DamageType } from "../build-analyzer";
-import type { CombineWith } from "./calculator-types";
-import type objectDamages from "./core/object-dmg.json";
+import type { CombineWith, DamageReceiver } from "./calculator-types";
+import type objectDamages from "./data/object-dmg.json";
 
 export const DAMAGE_RECEIVERS = [
 	"Chariot", // Crab Tank
@@ -12,7 +14,7 @@ export const DAMAGE_RECEIVERS = [
 	"GreatBarrier_Barrier", // Big Bubbler Shield
 	"GreatBarrier_WeakPoint", // Big Bubbler Weak Point
 	"BlowerInhale", // Ink Vac Inhale
-	"Firework", // Super Chump
+	"Decoy", // Super Chump
 	"BulletPogo", // Triple Splashdown
 	"Gachihoko_Barrier", // Rainmaker Shield
 	"Wsb_Flag", // Squid Beakon
@@ -27,6 +29,108 @@ export const DAMAGE_RECEIVERS = [
 	"BulletShelterCanopyFocus", // Recycled Brella Canopy
 	"BulletShelterCanopyFocus_Launched", // Recycled Brella Canopy launched
 ] as const;
+
+type ReceiverTranslation =
+	| { key: string }
+	| { weaponKey: string; suffixKey: string };
+
+/**
+ * Maps each damage receiver to the i18n key(s) describing the object it represents. Some
+ * receivers are a plain weapon/mode name, others combine a weapon name with a suffix (e.g.
+ * "<weapon> Canopy"). Consumed via {@link translateDamageReceiver}.
+ */
+const damageReceiverTranslations: Record<DamageReceiver, ReceiverTranslation> =
+	{
+		Chariot: { key: "weapons:SPECIAL_12" },
+		NiceBall_Armor: {
+			weaponKey: "weapons:SPECIAL_6",
+			suffixKey: "analyzer:damageReceiver.suffix.armor",
+		},
+		ShockSonar: { key: "weapons:SPECIAL_7" },
+		GreatBarrier_Barrier: {
+			weaponKey: "weapons:SPECIAL_2",
+			suffixKey: "analyzer:damageReceiver.suffix.shield",
+		},
+		GreatBarrier_WeakPoint: {
+			weaponKey: "weapons:SPECIAL_2",
+			suffixKey: "analyzer:damageReceiver.suffix.weakPoint",
+		},
+		BlowerInhale: {
+			weaponKey: "weapons:SPECIAL_8",
+			suffixKey: "analyzer:damageReceiver.suffix.inhale",
+		},
+		Decoy: { key: "weapons:SPECIAL_16" },
+		BulletPogo: { key: "weapons:SPECIAL_18" },
+		Gachihoko_Barrier: {
+			weaponKey: "game-misc:MODE_LONG_RM",
+			suffixKey: "analyzer:damageReceiver.suffix.shield",
+		},
+		Wsb_Flag: { key: "weapons:SUB_8" },
+		Wsb_Shield: { key: "weapons:SUB_4" },
+		Wsb_Sprinkler: { key: "weapons:SUB_3" },
+		Bomb_TorpedoBullet: { key: "weapons:SUB_13" },
+		BulletUmbrellaCanopyCompact: {
+			weaponKey: "weapons:MAIN_6020",
+			suffixKey: "analyzer:damageReceiver.suffix.canopy",
+		},
+		BulletUmbrellaCanopyNormal: {
+			weaponKey: "weapons:MAIN_6000",
+			suffixKey: "analyzer:damageReceiver.suffix.canopy",
+		},
+		BulletUmbrellaCanopyNormal_Launched: {
+			weaponKey: "weapons:MAIN_6000",
+			suffixKey: "analyzer:damageReceiver.suffix.canopyLaunched",
+		},
+		BulletUmbrellaCanopyWide: {
+			weaponKey: "weapons:MAIN_6010",
+			suffixKey: "analyzer:damageReceiver.suffix.canopy",
+		},
+		BulletUmbrellaCanopyWide_Launched: {
+			weaponKey: "weapons:MAIN_6010",
+			suffixKey: "analyzer:damageReceiver.suffix.canopyLaunched",
+		},
+		BulletShelterCanopyFocus: {
+			weaponKey: "weapons:MAIN_6030",
+			suffixKey: "analyzer:damageReceiver.suffix.canopy",
+		},
+		BulletShelterCanopyFocus_Launched: {
+			weaponKey: "weapons:MAIN_6030",
+			suffixKey: "analyzer:damageReceiver.suffix.canopyLaunched",
+		},
+	};
+
+/**
+ * Resolves the localized display name of a damage receiver using the given i18next `t` function.
+ * The `weapons`, `analyzer` and `game-misc` namespaces must be available to the caller.
+ */
+export function translateDamageReceiver<Ns extends Namespace>(
+	t: TFunction<Ns>,
+	receiver: DamageReceiver,
+): string {
+	const config = damageReceiverTranslations[receiver];
+	if ("key" in config) {
+		return t(config.key as never);
+	}
+	return t(config.suffixKey as never, {
+		weapon: t(config.weaponKey as never),
+	});
+}
+
+/**
+ * The suffix-only localized label of a damage receiver (e.g. "Shield", "Weak Point"), or `null`
+ * when the receiver is a plain weapon/mode name with no suffix. Used to disambiguate the parts of
+ * a multi-part object (e.g. Big Bubbler's shield vs. weak point) without repeating the weapon name.
+ */
+export function damageReceiverSuffix<Ns extends Namespace>(
+	t: TFunction<Ns>,
+	receiver: DamageReceiver,
+): string | null {
+	const config = damageReceiverTranslations[receiver];
+	if ("key" in config) {
+		return null;
+	}
+	return String(t(config.suffixKey as never, { weapon: "" })).trim();
+}
 
 export const damagePriorities: Array<
 	[
@@ -98,7 +202,8 @@ export const damagePriorities: Array<
 	["MAIN", [8000, 8010, 8020], "SPLATANA_HORIZONTAL", "Saber_Shot"],
 	["MAIN", [8000, 8010, 8020], "SPLATANA_HORIZONTAL_DIRECT", "Saber_Slash"],
 
-	["SUB", [0, 2, 7], "BOMB_NORMAL", "Bomb"], // TODO: could also consider "Bomb_DirectHit" it is almost the same but has different ratio for Big Bubbler core: 0.5 vs. 1.5
+	["SUB", [0, 2, 7], "BOMB_NORMAL", "Bomb"],
+	["SUB", [2], "BOMB_DIRECT", "Bomb_DirectHit"],
 	["SUB", [6], "BOMB_DIRECT", "Bomb_CurlingBullet"],
 	["SUB", [6], "BOMB_NORMAL", "Bomb"],
 	["SUB", [13], "SPLASH", "Bomb_TorpedoSplashBurst"],
@@ -128,41 +233,10 @@ export const damageTypesToCombine: Partial<
 	3040: [{ when: "DIRECT", combineWith: "DISTANCE" }],
 	// Tri-Stringer
 	7010: [{ when: "NORMAL_MAX", combineWith: "DISTANCE" }],
-	// Inkline Tri-Stringer
-	7011: [{ when: "NORMAL_MAX", combineWith: "DISTANCE" }],
 	// Wellstring V
 	7030: [{ when: "NORMAL_MAX", combineWith: "DISTANCE" }],
-	// Custom Wellstring V
-	7031: [{ when: "NORMAL_MAX", combineWith: "DISTANCE" }],
 	// Splatana Stamper
 	8000: [
-		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
-		{
-			when: "SPLATANA_HORIZONTAL_DIRECT",
-			combineWith: "SPLATANA_HORIZONTAL",
-			multiplierOnly: true,
-		},
-	],
-	// Splatana Stamper Nouveau
-	8001: [
-		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
-		{
-			when: "SPLATANA_HORIZONTAL_DIRECT",
-			combineWith: "SPLATANA_HORIZONTAL",
-			multiplierOnly: true,
-		},
-	],
-	// Stickerz Splatana Stamper
-	8002: [
-		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
-		{
-			when: "SPLATANA_HORIZONTAL_DIRECT",
-			combineWith: "SPLATANA_HORIZONTAL",
-			multiplierOnly: true,
-		},
-	],
-	// Order Splatana Replica
-	8005: [
 		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
 		{
 			when: "SPLATANA_HORIZONTAL_DIRECT",
@@ -179,24 +253,6 @@ export const damageTypesToCombine: Partial<
 			multiplierOnly: true,
 		},
 	],
-	// Splatana Wiper Deco
-	8011: [
-		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
-		{
-			when: "SPLATANA_HORIZONTAL_DIRECT",
-			combineWith: "SPLATANA_HORIZONTAL",
-			multiplierOnly: true,
-		},
-	],
-	// Splatana Wiper RUS-T
-	8012: [
-		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
-		{
-			when: "SPLATANA_HORIZONTAL_DIRECT",
-			combineWith: "SPLATANA_HORIZONTAL",
-			multiplierOnly: true,
-		},
-	],
 	// Mint Decavitator
 	8020: [
 		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
@@ -206,22 +262,4 @@ export const damageTypesToCombine: Partial<
 			multiplierOnly: true,
 		},
 	],
-	// Charcoal Decavitator
-	8021: [
-		{ when: "SPLATANA_VERTICAL_DIRECT", combineWith: "SPLATANA_VERTICAL" },
-		{
-			when: "SPLATANA_HORIZONTAL_DIRECT",
-			combineWith: "SPLATANA_HORIZONTAL",
-			multiplierOnly: true,
-		},
-	],
 };
-invariant(
-	mainWeaponIds.every((id) => {
-		// not Splatana
-		if (id < 8000 || id >= 9000) return true;
-
-		return Boolean(damageTypesToCombine[id]);
-	}),
-	"Splatana weapon missing from damageTypesToCombine",
-);
