@@ -1,6 +1,6 @@
-import type { Pronouns } from "~/db/tables";
+import type { Pronouns } from "~/db/tables-json";
 import type { TierName } from "~/features/mmr/mmr-constants";
-import type { DataTypes, ValueToArray } from "~/modules/brackets-manager/types";
+import type { BracketData } from "~/features/tournament-bracket/core/engine/types";
 
 /** GET /api/user/{userId|discordId} */
 
@@ -165,7 +165,7 @@ export interface GetTournamentResponse {
 	 */
 	url: string;
 	/**
-	 * @example "https://sendou.ink/static-assets/img/tournament-logos/itz.avif"
+	 * @example "https://sendou-assets.nyc3.cdn.digitaloceanspaces.com/img/tournament-logos/itz.avif"
 	 */
 	logoUrl: string | null;
 	/**
@@ -368,7 +368,10 @@ export interface GetTournamentBracketStandingsResponse {
 			setLosses: number;
 			mapWins: number;
 			mapLosses: number;
-			points: number;
+			/** @deprecated points are no longer tracked, see koCount instead */
+			points?: number;
+			/** (round robin only) how many knockout wins the team has */
+			koCount?: number;
 			winsAgainstTied: number;
 			lossesAgainstTied?: number;
 			buchholzSets?: number;
@@ -481,11 +484,11 @@ type Badge = {
 	name: string;
 	count: number;
 	/**
-	 * @example "https://sendou.ink/static-assets/badges/monday.avif"
+	 * @example "https://sendou-assets.nyc3.cdn.digitaloceanspaces.com/badges/monday.avif"
 	 */
 	imageUrl: string;
 	/**
-	 * @example "https://sendou.ink/static-assets/badges/monday.gif"
+	 * @example "https://sendou-assets.nyc3.cdn.digitaloceanspaces.com/badges/monday.gif"
 	 */
 	gifUrl: string;
 };
@@ -523,8 +526,8 @@ export type MapListMap = {
 		| "ROLL";
 	winnerTeamId: number | null;
 	participatedUserIds: Array<number> | null;
-	/** (round robin only) points of the match used for tiebreaker purposes. e.g. [100, 0] indicates a knockout. */
-	points: [number, number] | null;
+	/** (round robin only) whether the map ended in a knockout. `null` if not tracked. */
+	ko: boolean | null;
 };
 
 type TournamentMatchTeam = {
@@ -537,7 +540,7 @@ type TournamentBracket = {
 	name: string;
 };
 
-type TournamentBracketData = ValueToArray<DataTypes>;
+type TournamentBracketData = BracketData;
 
 /** POST /api/tournament/{id}/seeds */
 

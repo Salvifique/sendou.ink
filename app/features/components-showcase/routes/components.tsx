@@ -49,11 +49,18 @@ import { SubmitButton } from "~/components/SubmitButton";
 import { SubNav, SubNavLink } from "~/components/SubNav";
 import { Table } from "~/components/Table";
 import { WeaponSelect } from "~/components/WeaponSelect";
+import { UserCard } from "~/features/user-card/components/UserCard";
+import type { UserCardData } from "~/features/user-card/user-card-types";
 import type { CustomFieldRenderProps } from "~/form/FormField";
 import { SendouForm } from "~/form/SendouForm";
 import type { MainWeaponId, StageId } from "~/modules/in-game-lists/types";
+import type { SendouRouteHandle } from "~/utils/remix.server";
 import styles from "../components-showcase.module.css";
 import { formFieldsShowcaseSchema } from "../form-examples-schema";
+
+export const handle: SendouRouteHandle = {
+	i18n: ["user", "q"],
+};
 
 export const SECTIONS = [
 	{ title: "Buttons", id: "buttons", component: ButtonsSection },
@@ -78,6 +85,7 @@ export const SECTIONS = [
 	{ title: "Table", id: "table", component: TableSection },
 	{ title: "Pagination", id: "pagination", component: PaginationSection },
 	{ title: "Avatar", id: "avatar", component: AvatarSection },
+	{ title: "User Card", id: "user-card", component: UserCardSection },
 	{
 		title: "Form Messages",
 		id: "form-messages",
@@ -1565,6 +1573,58 @@ function AvatarSection({ id }: { id: string }) {
 	);
 }
 
+const USER_CARD_DATA = {
+	id: 1,
+	username: "Sendou",
+	discordId: "79237403620945920",
+	discordAvatar: null,
+	customUrl: "sendou",
+	customAvatarUrl: null,
+	banner: { type: "STAGE", stageId: 5 },
+	shortBio: "Very show bio goes here maybe max two lines that gets clamped.",
+	customTheme: null,
+	friendCode: "1234-1234-1234",
+	freeAgentPostId: 1,
+	privateNote: {
+		text: "Played with them, very friendly",
+		sentiment: "POSITIVE",
+		updatedAt: 1704067200,
+	},
+	stats: [
+		{
+			type: "XP",
+			values: [
+				{ isVerified: false, region: "JPN", points: 3123 },
+				{ isVerified: true, region: "JPN", points: 2901 },
+			],
+		},
+		{
+			type: "SEASON",
+			top: 59,
+			value: {
+				isPlus: true,
+				name: "LEVIATHAN",
+			},
+		},
+		{ type: "DIV", value: "1" },
+		{ type: "PLUS", value: 1 },
+	],
+} satisfies UserCardData;
+
+function UserCardSection({ id }: { id: string }) {
+	return (
+		<Section>
+			<SectionTitle id={id}>User Card</SectionTitle>
+
+			<div className="stack md">
+				<ComponentRow label="Click the trigger">
+					<UserCard data={USER_CARD_DATA}>Sendou</UserCard>
+				</ComponentRow>
+			</div>
+		</Section>
+	);
+}
+
 function FormMessageSection({ id }: { id: string }) {
 	return (
 		<Section>
@@ -2042,14 +2102,14 @@ function FormFieldsSection({ id }: { id: string }) {
 
 			<SendouForm
 				schema={formFieldsShowcaseSchema}
-				autoSubmit
+				mode="autoSubmit"
 				className="w-full"
 			>
 				{({ FormField }) => (
 					<div className="stack lg">
 						<Divider smallText>Text Fields</Divider>
 
-						<ComponentRow label="textFieldRequired">
+						<ComponentRow label="textField">
 							<FormField name="requiredText" />
 						</ComponentRow>
 
@@ -2063,7 +2123,7 @@ function FormFieldsSection({ id }: { id: string }) {
 
 						<Divider smallText>Text Areas</Divider>
 
-						<ComponentRow label="textAreaRequired">
+						<ComponentRow label="textArea">
 							<FormField name="requiredTextArea" />
 						</ComponentRow>
 
@@ -2113,7 +2173,7 @@ function FormFieldsSection({ id }: { id: string }) {
 
 						<Divider smallText>Date & Time</Divider>
 
-						<ComponentRow label="datetimeRequired">
+						<ComponentRow label="datetime">
 							<FormField name="requiredDatetime" />
 						</ComponentRow>
 
@@ -2121,7 +2181,7 @@ function FormFieldsSection({ id }: { id: string }) {
 							<FormField name="optionalDatetime" />
 						</ComponentRow>
 
-						<ComponentRow label="dayMonthYearRequired">
+						<ComponentRow label="dayMonthYear">
 							<FormField name="birthDate" />
 						</ComponentRow>
 

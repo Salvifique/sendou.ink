@@ -59,10 +59,10 @@ export function Widget({
 	user,
 }: {
 	widget: SerializeFrom<LoadedWidget>;
-	user: Pick<Tables["User"], "discordId" | "customUrl">;
+	user: Pick<Tables["User"], "id" | "discordId" | "customUrl">;
 }) {
 	const { t } = useTranslation(["user", "badges", "team", "org", "lfg"]);
-	const { formatter: patronSinceFormatter } = useDateTimeFormat({
+	const { formatter: patronStartedAtFormatter } = useDateTimeFormat({
 		day: "numeric",
 		month: "numeric",
 		year: "numeric",
@@ -79,11 +79,23 @@ export function Widget({
 					</article>
 				);
 			case "badges-owned":
-				return <BadgeDisplay badges={widget.data} />;
+				return (
+					<BadgeDisplay badges={widget.data} key={`badges-owned-${user.id}`} />
+				);
 			case "badges-authored":
-				return <BadgeDisplay badges={widget.data} />;
+				return (
+					<BadgeDisplay
+						badges={widget.data}
+						key={`badges-authored-${user.id}`}
+					/>
+				);
 			case "badges-managed":
-				return <BadgeDisplay badges={widget.data} />;
+				return (
+					<BadgeDisplay
+						badges={widget.data}
+						key={`badges-managed-${user.id}`}
+					/>
+				);
 			case "teams":
 				return (
 					<Memberships
@@ -172,7 +184,9 @@ export function Widget({
 			case "patron-since":
 				if (!widget.data) return null;
 				return (
-					<BigValue value={patronSinceFormatter.format(widget.data) ?? ""} />
+					<BigValue
+						value={patronStartedAtFormatter.format(widget.data) ?? ""}
+					/>
 				);
 			case "join-date":
 				if (!widget.data) return null;
@@ -406,7 +420,7 @@ function HighlightedResults({
 							) : null}
 						</div>
 						<LocaleTime
-							date={result.startTime}
+							date={result.startsAt}
 							options={{
 								day: "numeric",
 								month: "numeric",

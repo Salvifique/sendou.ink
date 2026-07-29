@@ -1,5 +1,4 @@
 import type { ActionFunctionArgs } from "react-router";
-import { redirect } from "react-router";
 import { db } from "~/db/sql";
 import { requireUser } from "~/features/auth/core/user.server";
 import * as ChatSystemMessage from "~/features/chat/ChatSystemMessage.server";
@@ -9,7 +8,6 @@ import {
 	refreshSendouQInstance,
 	SendouQ,
 } from "~/features/sendouq/core/SendouQ.server";
-import * as PrivateUserNoteRepository from "~/features/sendouq/PrivateUserNoteRepository.server";
 import { SENDOUQ_LOOKING_ROOM } from "~/features/sendouq/q-constants";
 import { SendouQError } from "~/features/sendouq/q-utils.server";
 import * as SQGroupRepository from "~/features/sendouq/SQGroupRepository.server";
@@ -21,12 +19,11 @@ import { logger } from "~/utils/logger";
 import {
 	errorToast,
 	errorToastIfFalsy,
-	notFoundIfFalsy,
+	notFoundIfNullish,
 	parseParams,
 	parseRequestPayload,
 } from "~/utils/remix.server";
 import { assertUnreachable } from "~/utils/types";
-import { sendouQMatchPage } from "~/utils/urls";
 import * as RejoinVote from "../core/RejoinVote";
 import * as SendouQMatch from "../core/SendouQMatch";
 import { matchSchema, qMatchPageParamsSchema } from "../q-match-schemas";
@@ -42,7 +39,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 		schema: matchSchema,
 	});
 
-	const match = notFoundIfFalsy(await SQMatchRepository.findById(matchId));
+	const match = notFoundIfNullish(await SQMatchRepository.findById(matchId));
 	const isStaff = user.roles.includes("STAFF");
 	const isParticipant = [
 		...match.groupAlpha.members,
@@ -83,7 +80,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 				if (result.status === "MATCH_FINALIZED") {
 					try {
-						refreshUserSkills(Seasons.currentOrPrevious()!.nth);
+						await refreshUserSkills(Seasons.currentOrPrevious()!.nth);
 					} catch (error) {
 						logger.warn("Error refreshing user skills", error);
 					}
@@ -140,7 +137,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 					errorToastIfFalsy(!currentGroup, "Member is already in a group");
 				}
 
-				await SQGroupRepository.createGroupFromPrevious({
+				await SQGroupRepository.insertFromPrevious({
 					previousGroupId: data.previousGroupId,
 					members: previousGroup.members.map((m) => ({
 						id: m.id,
@@ -185,7 +182,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 				const votingResult = await db.transaction().execute(async (trx) => {
 					const existingVotes =
-						await GroupMatchContinueVoteRepository.findForGroups(
+						await GroupMatchContinueVoteRepository.findAllByGroupIds(
 							[viewerGroup.id],
 							trx,
 						);
@@ -194,7 +191,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 						return null;
 					}
 
-					await GroupMatchContinueVoteRepository.cast(
+					await GroupMatchContinueVoteRepository.castOwnVote(
 						{
 							groupId: viewerGroup.id,
 							isContinuing: data.isContinuing,
@@ -203,7 +200,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 					);
 
 					return RejoinVote.result(
-						await GroupMatchContinueVoteRepository.findForGroups(
+						await GroupMatchContinueVoteRepository.findAllByGroupIds(
 							[viewerGroup.id],
 							trx,
 						),
@@ -216,7 +213,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 						.map((m) => ({ id: m.id, role: m.role }));
 
 					try {
-						await SQGroupRepository.createGroupFromPrevious({
+						await SQGroupRepository.insertFromPrevious({
 							previousGroupId: viewerGroup.id,
 							members: survivors,
 							status: "ACTIVE",
@@ -262,15 +259,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 				});
 
 				break;
-			}
-			case "ADD_PRIVATE_USER_NOTE": {
-				await PrivateUserNoteRepository.upsertOwnNote({
-					sentiment: data.sentiment,
-					targetId: data.targetId,
-					text: data.comment,
-				});
-
-				throw redirect(sendouQMatchPage(matchId));
 			}
 			case "UNDO_MATCH_REPORT": {
 				const result = await SQMatchRepository.undoMatchReport({
@@ -382,7 +370,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 
 				if (result.shouldRefreshCaches) {
 					try {
-						refreshUserSkills(Seasons.currentOrPrevious()!.nth);
+						await refreshUserSkills(Seasons.currentOrPrevious()!.nth);
 					} catch (error) {
 						logger.warn("Error refreshing user skills", error);
 					}

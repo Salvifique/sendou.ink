@@ -44,13 +44,13 @@ function addRunningTournament(
 let timeOffset = 0;
 
 describe("syncLiveStreams tournament streamers", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(
 			add(new Date("2025-01-15T12:00:00Z"), { minutes: timeOffset }),
 		);
 		timeOffset += 31;
-		dbReset();
+		await dbReset();
 		RunningTournaments.clear();
 		mockGetStreams.mockReset();
 	});
@@ -104,6 +104,7 @@ describe("syncLiveStreams tournament streamers", () => {
 							twitch: "player_one",
 							plusTier: null,
 							role: "OWNER",
+							isSub: 0,
 							createdAt: 0,
 							streamTwitch: null,
 							streamViewerCount: null,
@@ -145,6 +146,7 @@ describe("syncLiveStreams tournament streamers", () => {
 							twitch: "dropped_player",
 							plusTier: null,
 							role: "OWNER",
+							isSub: 0,
 							createdAt: 0,
 							streamTwitch: null,
 							streamViewerCount: null,
@@ -199,6 +201,7 @@ describe("syncLiveStreams tournament streamers", () => {
 							twitch: "different_account",
 							plusTier: null,
 							role: "OWNER",
+							isSub: 0,
 							createdAt: 0,
 							streamTwitch: null,
 							streamViewerCount: null,
@@ -236,6 +239,7 @@ describe("syncLiveStreams tournament streamers", () => {
 							twitch: "streamer_a",
 							plusTier: null,
 							role: "OWNER",
+							isSub: 0,
 							createdAt: 0,
 							streamTwitch: null,
 							streamViewerCount: null,
@@ -276,6 +280,7 @@ describe("syncLiveStreams tournament streamers", () => {
 							twitch: "streamer_b",
 							plusTier: null,
 							role: "OWNER",
+							isSub: 0,
 							createdAt: 0,
 							streamTwitch: null,
 							streamViewerCount: null,

@@ -1,4 +1,11 @@
-import { Link as LinkIcon, Lock, LogOut, SquarePen, Users } from "lucide-react";
+import {
+	ChartNoAxesColumn,
+	Link as LinkIcon,
+	Lock,
+	LogOut,
+	SquarePen,
+	Users,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { MetaFunction } from "react-router";
 import { Link, useLoaderData, useSearchParams } from "react-router";
@@ -33,6 +40,7 @@ import {
 	navIconUrl,
 	tournamentOrganizationEditPage,
 	tournamentOrganizationPage,
+	tournamentOrganizationStatsPage,
 	tournamentPage,
 	userPage,
 } from "~/utils/urls";
@@ -47,15 +55,15 @@ import { updateIsEstablishedSchema } from "../tournament-organization-schemas";
 export { action, loader };
 
 export const meta: MetaFunction<typeof loader> = (args) => {
-	if (!args.data) return [];
+	if (!args.loaderData) return [];
 
 	return metaTags({
-		title: args.data.organization.name,
+		title: args.loaderData.organization.name,
 		location: args.location,
-		description: args.data.organization.description ?? undefined,
-		image: args.data.organization.avatarUrl
+		description: args.loaderData.organization.description ?? undefined,
+		image: args.loaderData.organization.avatarUrl
 			? {
-					url: args.data.organization.avatarUrl,
+					url: args.loaderData.organization.avatarUrl,
 					dimensions: { width: 124, height: 124 },
 				}
 			: undefined,
@@ -65,7 +73,7 @@ export const meta: MetaFunction<typeof loader> = (args) => {
 export const handle: SendouRouteHandle = {
 	i18n: ["badges", "org"],
 	breadcrumb: ({ match }) => {
-		const data = match.data as SerializeFrom<typeof loader> | undefined;
+		const data = match.loaderData as SerializeFrom<typeof loader> | undefined;
 
 		if (!data) return [];
 
@@ -118,13 +126,18 @@ function LogoHeader() {
 	const currentMember = user
 		? data.organization.members.find((m) => m.id === user.id)
 		: undefined;
+	const isOrgAdmin = currentMember?.role === "ADMIN";
 	const isSoleAdmin =
-		currentMember?.role === "ADMIN" &&
+		isOrgAdmin &&
 		data.organization.members.filter((m) => m.role === "ADMIN").length === 1;
 
 	return (
 		<div className="stack horizontal md">
-			<Avatar size="lg" url={data.organization.avatarUrl ?? undefined} />
+			<Avatar
+				size="lg"
+				url={data.organization.avatarUrl ?? undefined}
+				loading="eager"
+			/>
 			<div className="stack sm">
 				<div className="text-xl font-bold">{data.organization.name}</div>
 				{canEditOrganization || currentMember ? (
@@ -138,6 +151,17 @@ function LogoHeader() {
 								testId="edit-org-button"
 							>
 								{t("common:actions.edit")}
+							</LinkButton>
+						) : null}
+						{isOrgAdmin ? (
+							<LinkButton
+								to={tournamentOrganizationStatsPage(data.organization.slug)}
+								icon={<ChartNoAxesColumn />}
+								size="small"
+								variant="outlined"
+								testId="org-stats-button"
+							>
+								{t("org:stats.title")}
 							</LinkButton>
 						) : null}
 						{currentMember ? (
@@ -261,7 +285,7 @@ function AdminControls() {
 				defaultValues={{
 					isEstablished: Boolean(data.organization.isEstablished),
 				}}
-				autoSubmit
+				mode="autoSubmit"
 			>
 				{({ FormField }) => <FormField name="isEstablished" />}
 			</SendouForm>
@@ -461,11 +485,11 @@ function EventsList({
 	const events = filteredByMonth
 		? data.events.filter(
 				(event) =>
-					databaseTimestampToDate(event.startTime).getMonth() === data.month,
+					databaseTimestampToDate(event.startsAt).getMonth() === data.month,
 			)
 		: data.events;
-	const pastEvents = events.filter((event) => event.startTime < now);
-	const upcomingEvents = events.filter((event) => event.startTime >= now);
+	const pastEvents = events.filter((event) => event.startsAt < now);
+	const upcomingEvents = events.filter((event) => event.startsAt >= now);
 
 	return (
 		<div className="w-full stack xs">
@@ -516,7 +540,7 @@ function EventInfo({
 				<div>
 					<div>{event.name}</div>
 					<LocaleTime
-						date={event.startTime}
+						date={event.startsAt}
 						options={{
 							day: "numeric",
 							month: "numeric",

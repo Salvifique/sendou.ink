@@ -3,9 +3,11 @@ import type { ExpressionBuilder, NotNull, Transaction } from "kysely";
 import { jsonArrayFrom, jsonObjectFrom } from "kysely/helpers/sqlite";
 import * as R from "remeda";
 import { db } from "~/db/sql";
-import type { DB, ParsedMemento } from "~/db/tables";
+import type { DB } from "~/db/tables";
+import type { ParsedMemento } from "~/db/tables-json";
 import { actorId } from "~/features/auth/core/user.server";
 import * as Seasons from "~/features/mmr/core/Seasons";
+import { serializeMaplistSource } from "~/modules/tournament-map-list-generator/source";
 import type { TournamentMapListMap } from "~/modules/tournament-map-list-generator/types";
 import { mostPopularArrayElement } from "~/utils/arrays";
 import { dateToDatabaseTimestamp } from "~/utils/dates";
@@ -29,9 +31,20 @@ import {
 	summarizeMaps,
 	summarizePlayerResults,
 } from "./core/summarizer.server";
+import * as MatchSkillRepository from "./MatchSkillRepository.server";
 import * as PlayerStatRepository from "./PlayerStatRepository.server";
 import * as ReportedWeaponRepository from "./ReportedWeaponRepository.server";
-import * as SkillRepository from "./SkillRepository.server";
+
+/** Whether a GroupMatch with the given id exists. */
+export async function exists(id: number) {
+	const row = await db
+		.selectFrom("GroupMatch")
+		.select("id")
+		.where("id", "=", id)
+		.executeTakeFirst();
+
+	return Boolean(row);
+}
 
 export async function findById(id: number) {
 	const result = await db
@@ -45,6 +58,7 @@ export async function findById(id: number) {
 			"GroupMatch.memento",
 			"GroupMatch.cancelRequestedByUserId",
 			"GroupMatch.cancelAcceptedByUserId",
+			"GroupMatch.noScreen",
 
 			exists(
 				selectFrom("Skill")
@@ -123,7 +137,6 @@ function groupWithTeamAndMembers(
 					eb
 						.selectFrom("GroupMember")
 						.innerJoin("User", "User.id", "GroupMember.userId")
-						.leftJoin("PlusTier", "User.id", "PlusTier.userId")
 						.leftJoin("GroupMatchContinueVote", (join) =>
 							join
 								.onRef(
@@ -148,7 +161,6 @@ function groupWithTeamAndMembers(
 							"User.noScreen",
 							matchProfileWeapons(arrayEb).as("weapons"),
 							"User.mapModePreferences",
-							"PlusTier.tier as plusTier",
 							"GroupMatchContinueVote.isContinuing",
 							arrayEb
 								.selectFrom("UserFriendCode")
@@ -169,7 +181,7 @@ function groupWithTeamAndMembers(
 /**
  * Retrieves the pages count of results for a specific user and season. Counting both SendouQ matches and ranked tournaments.
  */
-export async function seasonResultPagesByUserId({
+export async function countSeasonResultPagesByUserId({
 	userId,
 	season,
 }: {
@@ -181,10 +193,19 @@ export async function seasonResultPagesByUserId({
 		.select(({ fn }) => [fn.countAll().as("count")])
 		.where("userId", "=", userId)
 		.where("season", "=", season)
-		.where(({ or, eb }) =>
+		.where(({ or, eb, exists, selectFrom }) =>
 			or([
 				eb("groupMatchId", "is not", null),
-				eb("tournamentId", "is not", null),
+				exists(
+					selectFrom("TournamentResult")
+						.select("TournamentResult.userId")
+						.whereRef(
+							"TournamentResult.tournamentId",
+							"=",
+							"Skill.tournamentId",
+						)
+						.where("TournamentResult.userId", "=", userId),
+				),
 			]),
 		)
 		.executeTakeFirstOrThrow();
@@ -213,7 +234,7 @@ const tournamentResultsSubQuery = (
 			"TournamentResult.setResults",
 			"TournamentResult.tournamentId",
 			"TournamentResult.tournamentTeamId",
-			"CalendarEventDate.startTime as tournamentStartTime",
+			"CalendarEventDate.startsAt as tournamentStartTime",
 			"CalendarEvent.name as tournamentName",
 			tournamentLogoWithDefault(eb).as("logoUrl"),
 		])
@@ -277,19 +298,19 @@ const groupMatchResultsSubQuery = (eb: ExpressionBuilder<DB, "Skill">) => {
 };
 
 export type SeasonGroupMatch = Extract<
-	Unpacked<Unpacked<ReturnType<typeof seasonResultsByUserId>>>,
+	Unpacked<Unpacked<ReturnType<typeof findSeasonResultsByUserId>>>,
 	{ type: "GROUP_MATCH" }
 >["groupMatch"];
 
 export type SeasonTournamentResult = Extract<
-	Unpacked<Unpacked<ReturnType<typeof seasonResultsByUserId>>>,
+	Unpacked<Unpacked<ReturnType<typeof findSeasonResultsByUserId>>>,
 	{ type: "TOURNAMENT_RESULT" }
 >["tournamentResult"];
 
 /**
  * Retrieves results of given user, competitive season & page. Both SendouQ matches and ranked tournaments.
  */
-export async function seasonResultsByUserId({
+export async function findSeasonResultsByUserId({
 	userId,
 	season,
 	page = 1,
@@ -310,10 +331,19 @@ export async function seasonResultsByUserId({
 		])
 		.where("userId", "=", userId)
 		.where("season", "=", season)
-		.where(({ or, eb }) =>
+		.where(({ or, eb, exists, selectFrom }) =>
 			or([
 				eb("groupMatchId", "is not", null),
-				eb("tournamentId", "is not", null),
+				exists(
+					selectFrom("TournamentResult")
+						.select("TournamentResult.userId")
+						.whereRef(
+							"TournamentResult.tournamentId",
+							"=",
+							"Skill.tournamentId",
+						)
+						.where("TournamentResult.userId", "=", userId),
+				),
 			]),
 		)
 		.limit(MATCHES_PER_SEASONS_PAGE)
@@ -384,7 +414,7 @@ export async function seasonResultsByUserId({
 		.filter((result) => result !== null);
 }
 
-export async function seasonCanceledMatchesByUserId({
+export async function findSeasonCanceledMatchesByUserId({
 	userId,
 	season,
 }: {
@@ -422,7 +452,7 @@ export async function seasonCanceledMatchesByUserId({
 		.execute();
 }
 
-export function create({
+export function insert({
 	alphaGroupId,
 	bravoGroupId,
 	mapList,
@@ -449,6 +479,14 @@ export function create({
 			throw new SendouQError("Can't leave group when already in a match");
 		}
 
+		const memberPreferringNoScreen = await trx
+			.selectFrom("GroupMember")
+			.innerJoin("User", "User.id", "GroupMember.userId")
+			.select("User.id")
+			.where("GroupMember.groupId", "in", [alphaGroupId, bravoGroupId])
+			.where("User.noScreen", "=", 1)
+			.executeTakeFirst();
+
 		const match = await trx
 			.insertInto("GroupMatch")
 			.values({
@@ -456,6 +494,7 @@ export function create({
 				bravoGroupId,
 				chatCode: shortNanoid(),
 				memento: JSON.stringify(memento),
+				noScreen: memberPreferringNoScreen ? 1 : 0,
 			})
 			.returningAll()
 			.executeTakeFirstOrThrow();
@@ -468,7 +507,7 @@ export function create({
 					index: i,
 					mode: map.mode,
 					stageId: map.stageId,
-					source: String(map.source),
+					source: serializeMaplistSource(map.source),
 				})),
 			)
 			.execute();
@@ -1053,7 +1092,7 @@ async function finalizeMatch({
 	confirmedByUserId: number;
 	preFinalize?: (trx: Transaction<DB>) => Promise<unknown>;
 }) {
-	const { newSkills, differences } = calculateMatchSkills({
+	const { newSkills, differences } = await calculateMatchSkills({
 		groupMatchId: match.id,
 		winner: (match.groupAlpha.id === winnerGroupId
 			? match.groupAlpha
@@ -1086,7 +1125,7 @@ async function finalizeMatch({
 			summarizePlayerResults({ match, members, winners }),
 			trx,
 		);
-		await SkillRepository.createMatchSkills(
+		await MatchSkillRepository.insertMatchSkills(
 			{
 				skills: newSkills,
 				differences,

@@ -13,7 +13,12 @@ import {
 import * as React from "react";
 import { ErrorBoundary } from "react-error-boundary";
 import { useTranslation } from "react-i18next";
-import { Outlet, useOutletContext, useRevalidator } from "react-router";
+import {
+	Outlet,
+	useLocation,
+	useOutletContext,
+	useRevalidator,
+} from "react-router";
 import { Alert } from "~/components/Alert";
 import { Divider } from "~/components/Divider";
 import { LinkButton, SendouButton } from "~/components/elements/Button";
@@ -30,6 +35,7 @@ import { useWebsocketRevalidation } from "~/features/chat/chat-hooks";
 import { TOURNAMENT } from "~/features/tournament/tournament-constants";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useHydrated } from "~/hooks/useHydrated";
+import { useIsomorphicLayoutEffect } from "~/hooks/useIsomorphicLayoutEffect";
 import { useSearchParamState } from "~/hooks/useSearchParamState";
 import { useVisibilityChange } from "~/hooks/useVisibilityChange";
 import type { SendouRouteHandle } from "~/utils/remix.server";
@@ -65,6 +71,8 @@ export default function TournamentBracketsPage() {
 	const user = useUser();
 	const tournament = useTournament();
 	const ctx = useOutletContext();
+
+	useScrollToMatchOnLoad();
 
 	const defaultBracketIdx = () => {
 		if (
@@ -172,6 +180,15 @@ export default function TournamentBracketsPage() {
 			)} rounds of the losers bracket can play in this bracket`;
 		}
 
+		if (
+			tournament.brackets[0].type === "single_elimination" &&
+			bracket.isUnderground
+		) {
+			return `Teams that get eliminated in the first ${Math.abs(
+				Math.min(...(bracket.sources ?? []).flatMap((s) => s.placements)),
+			)} rounds can play in this bracket`;
+		}
+
 		const advanceThreshold = tournament.brackets[0].settings?.advanceThreshold;
 		if (
 			advanceThreshold &&
@@ -234,6 +251,31 @@ export default function TournamentBracketsPage() {
 	);
 }
 
+/** Location state accepted by the brackets page (e.g. from the match page's "Back to bracket" link). */
+export interface BracketsPageState {
+	/** If set, the referenced match is scrolled into view on load. */
+	scrollToMatchId?: number;
+}
+
+/**
+ * Scrolls the match referenced by the navigation `state` into view on load, so
+ * returning from a match page lands the user at that match's spot in the bracket
+ * instead of the top.
+ */
+function useScrollToMatchOnLoad() {
+	const location = useLocation();
+	const scrollToMatchId = (location.state as BracketsPageState | null)
+		?.scrollToMatchId;
+
+	useIsomorphicLayoutEffect(() => {
+		if (typeof scrollToMatchId !== "number") return;
+
+		document
+			.querySelector(`[data-match-id="${scrollToMatchId}"]`)
+			?.scrollIntoView({ block: "center", inline: "center" });
+	}, [scrollToMatchId]);
+}
+
 function eligibleTeamCountForBracket(
 	tournament: Tournament,
 	bracket: BracketType,
@@ -279,7 +321,7 @@ function getAbDivisionsStartError(
 		return null;
 	}
 
-	const groupCount = new Set(bracket.data.round.map((r) => r.group_id)).size;
+	const groupCount = new Set(bracket.data.round.map((r) => r.groupId)).size;
 	const abDivisionsBySeedOrder = bracket.seeding.map(
 		(teamId) => tournament.teamById(teamId)?.abDivision,
 	);

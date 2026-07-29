@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CastedMatchesInfo } from "~/db/tables";
+import type { CastedMatchesInfo } from "~/db/tables-json";
 import * as Seasons from "../mmr/core/Seasons";
 import type { ParsedBracket } from "../tournament-bracket/core/Progression";
 import { testTournament } from "../tournament-bracket/core/tests/test-utils";
@@ -782,6 +782,7 @@ describe("tournamentNameParts", () => {
 					id: 1,
 					name: "Sendou's Tournaments",
 					slug: "sendou",
+					isEstablished: 1,
 					logoUrl: null,
 					members: [],
 					series: [{ name: "In The Zone" }],

@@ -9,14 +9,12 @@ import type { TournamentDataTeam } from "./Tournament.server";
 
 const createOpponent = (
 	id: number,
-	result: "win" | "loss",
 	score: number,
 	droppedOut = false,
 	activeRosterUserIds: number[] | null = null,
 	memberUserIds: number[] = [],
 ): AllMatchResult["opponentOne"] => ({
 	id,
-	result,
 	score,
 	droppedOut,
 	activeRosterUserIds,
@@ -51,6 +49,7 @@ describe("tournamentSummary()", () => {
 			streamViewerCount: null,
 			streamThumbnailUrl: null,
 			role: "REGULAR",
+			isSub: 0,
 			customAvatarUrl: null,
 		})),
 		name: `Team ${teamId}`,
@@ -194,8 +193,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 1,
 						},
 					],
-					opponentOne: createOpponent(1, "win", 2),
-					opponentTwo: createOpponent(2, "loss", 0),
+					opponentOne: createOpponent(1, 2),
+					opponentTwo: createOpponent(2, 0),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -303,8 +303,9 @@ describe("tournamentSummary()", () => {
 					winnerTeamId: 1,
 				},
 			],
-			opponentOne: createOpponent(1, "win", 2),
-			opponentTwo: createOpponent(2, "loss", 0),
+			opponentOne: createOpponent(1, 2),
+			opponentTwo: createOpponent(2, 0),
+			winnerSide: "opponent1",
 			roundMaps: {
 				count: 3,
 				type: "BEST_OF",
@@ -343,8 +344,9 @@ describe("tournamentSummary()", () => {
 					winnerTeamId: 1,
 				},
 			],
-			opponentOne: createOpponent(1, "win", 2),
-			opponentTwo: createOpponent(2, "loss", 0),
+			opponentOne: createOpponent(1, 2),
+			opponentTwo: createOpponent(2, 0),
+			winnerSide: "opponent1",
 			roundMaps: {
 				count: 3,
 				type: "BEST_OF",
@@ -429,8 +431,9 @@ describe("tournamentSummary()", () => {
 					winnerTeamId: 1,
 				},
 			],
-			opponentOne: createOpponent(1, "win", 2),
-			opponentTwo: createOpponent(2, "loss", 1),
+			opponentOne: createOpponent(1, 2),
+			opponentTwo: createOpponent(2, 1),
+			winnerSide: "opponent1",
 			roundMaps: {
 				count: 3,
 				type: "BEST_OF",
@@ -594,8 +597,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 1,
 						},
 					],
-					opponentOne: createOpponent(1, "win", 3),
-					opponentTwo: createOpponent(2, "loss", 0),
+					opponentOne: createOpponent(1, 3),
+					opponentTwo: createOpponent(2, 0),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -644,8 +648,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 1,
 						},
 					],
-					opponentOne: createOpponent(1, "win", 2),
-					opponentTwo: createOpponent(2, "loss", 0),
+					opponentOne: createOpponent(1, 2),
+					opponentTwo: createOpponent(2, 0),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -900,8 +905,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 1,
 						},
 					],
-					opponentOne: createOpponent(1, "win", 0),
-					opponentTwo: createOpponent(2, "loss", 0),
+					opponentOne: createOpponent(1, 0),
+					opponentTwo: createOpponent(2, 0),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -936,8 +942,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 1,
 						},
 					],
-					opponentOne: createOpponent(1, "win", 1),
-					opponentTwo: createOpponent(2, "loss", 0),
+					opponentOne: createOpponent(1, 1),
+					opponentTwo: createOpponent(2, 0),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -961,8 +968,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 3,
 						},
 					],
-					opponentOne: createOpponent(3, "win", 0),
-					opponentTwo: createOpponent(4, "loss", 0),
+					opponentOne: createOpponent(3, 0),
+					opponentTwo: createOpponent(4, 0),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -1011,8 +1019,9 @@ describe("tournamentSummary()", () => {
 							winnerTeamId: 1,
 						},
 					],
-					opponentOne: createOpponent(1, "win", 1, false),
-					opponentTwo: createOpponent(2, "loss", 0, true),
+					opponentOne: createOpponent(1, 1, false),
+					opponentTwo: createOpponent(2, 0, true),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -1037,8 +1046,9 @@ describe("tournamentSummary()", () => {
 			results: [
 				{
 					maps: [],
-					opponentOne: createOpponent(1, "win", 0, false, [1, 2, 3, 4]),
-					opponentTwo: createOpponent(2, "loss", 0, true, [5, 6, 7, 8]),
+					opponentOne: createOpponent(1, 0, false, [1, 2, 3, 4]),
+					opponentTwo: createOpponent(2, 0, true, [5, 6, 7, 8]),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",
@@ -1064,8 +1074,9 @@ describe("tournamentSummary()", () => {
 				{
 					maps: [],
 					// No activeRosterUserIds, but memberUserIds is set
-					opponentOne: createOpponent(1, "win", 0, false, null, [1, 2, 3, 4]),
-					opponentTwo: createOpponent(2, "loss", 0, true, null, [5, 6, 7, 8]),
+					opponentOne: createOpponent(1, 0, false, null, [1, 2, 3, 4]),
+					opponentTwo: createOpponent(2, 0, true, null, [5, 6, 7, 8]),
+					winnerSide: "opponent1",
 					roundMaps: {
 						count: 3,
 						type: "BEST_OF",

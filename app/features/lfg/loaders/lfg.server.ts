@@ -1,28 +1,42 @@
+import * as R from "remeda";
 import { getUser } from "~/features/auth/core/user.server";
 import * as Seasons from "~/features/mmr/core/Seasons";
 import type { TieredSkill } from "~/features/mmr/tiered.server";
 import { userSkills } from "~/features/mmr/tiered.server";
+import * as UserCardRepository from "~/features/user-card/UserCardRepository.server";
 import type { Unpacked } from "~/utils/types";
 import * as LFGRepository from "../LFGRepository.server";
 
 export const loader = async () => {
 	const user = getUser();
-	const posts = await LFGRepository.posts(user);
+	const posts = await LFGRepository.findAllPosts(user);
+
+	const cardUserIds = R.unique(
+		posts.flatMap((post) => [
+			post.author.id,
+			...(post.team?.members ?? []).map((member) => member.id),
+		]),
+	);
 
 	return {
 		posts,
-		tiersMap: postsUsersTiersMap(posts),
+		tiersMap: await postsUsersTiersMap(posts),
+		...(await UserCardRepository.findAllByUserIds({
+			userIds: cardUserIds,
+		})),
 	};
 };
 
-function postsUsersTiersMap(
-	posts: Unpacked<ReturnType<typeof LFGRepository.posts>>,
+async function postsUsersTiersMap(
+	posts: Unpacked<ReturnType<typeof LFGRepository.findAllPosts>>,
 ) {
 	const latestSeason = Seasons.currentOrPrevious()!.nth;
 	const previousSeason = latestSeason - 1;
 
-	const latestSeasonSkills = userSkills(latestSeason).userSkills;
-	const previousSeasonSkills = userSkills(previousSeason).userSkills;
+	const [
+		{ userSkills: latestSeasonSkills },
+		{ userSkills: previousSeasonSkills },
+	] = await Promise.all([userSkills(latestSeason), userSkills(previousSeason)]);
 
 	const uniqueUsers = new Set<number>();
 	for (const post of posts) {

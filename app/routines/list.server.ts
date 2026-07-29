@@ -1,11 +1,13 @@
 import { CloseExpiredCommissionsRoutine } from "./closeExpiredCommissions";
 import { CloseExpiredContinueVotesRoutine } from "./closeExpiredContinueVotes";
+import { ComputeLutiDivsRoutine } from "./computeLutiDivs";
 import { DeleteObsoleteMatchVodsRoutine } from "./deleteObsoleteMatchVods";
 import { DeleteOldExternalStreamsRoutine } from "./deleteOldExternalStreams";
 import { DeleteOldNotificationsRoutine } from "./deleteOldNotifications";
 import { DeleteOldPendingFriendRequestsRoutine } from "./deleteOldPendingFriendRequests";
 import { DeleteOldTournamentAuditLogsRoutine } from "./deleteOldTournamentAuditLogs";
 import { DeleteOrphanArtTagsRoutine } from "./deleteOrphanArtTags";
+import { EvictStaleRunningTournamentsRoutine } from "./evictStaleRunningTournaments";
 import { NotifyCheckInStartRoutine } from "./notifyCheckInStart";
 import { NotifyPlusServerVotingRoutine } from "./notifyPlusServerVoting";
 import { NotifyScrimStartingSoonRoutine } from "./notifyScrimStartingSoon";
@@ -33,6 +35,7 @@ export const everyHourAt30 = [
 	UpdatePatreonDataRoutine,
 	CloseExpiredContinueVotesRoutine,
 	DeleteOldExternalStreamsRoutine,
+	EvictStaleRunningTournamentsRoutine,
 ];
 
 /** List of Routines that should occur daily */
@@ -43,6 +46,7 @@ export const daily = [
 	DeleteOldTournamentAuditLogsRoutine,
 	CloseExpiredCommissionsRoutine,
 	DeleteOrphanArtTagsRoutine,
+	ComputeLutiDivsRoutine,
 	OptimizeDatabaseRoutine,
 ];
 

@@ -4,7 +4,7 @@ import { db } from "~/db/sql";
 import type { DB } from "~/db/tables";
 import { sortBadgesByFavorites } from "~/features/user-page/core/badge-sorting.server";
 import invariant from "~/utils/invariant";
-import { commonUserSelect } from "~/utils/kysely.server";
+import { commonUserSelect, peakXpOverallSql } from "~/utils/kysely.server";
 import { SPLATOON_3_XP_BADGE_VALUES } from "./badges-constants";
 import { findSplatoon3XpBadgeValue } from "./badges-utils";
 
@@ -55,7 +55,7 @@ const withOwners = (eb: ExpressionBuilder<DB, "Badge">, badgeId: number) => {
 	).as("owners");
 };
 
-export async function all() {
+export async function findAll() {
 	const rows = await db
 		.selectFrom("Badge")
 		.select(({ eb }) => [
@@ -215,6 +215,7 @@ export function replaceOwners({
 
 export async function syncXPBadges() {
 	return db.transaction().execute(async (trx) => {
+		const badgeIdByValue = new Map<number, number>();
 		for (const value of SPLATOON_3_XP_BADGE_VALUES) {
 			const badge = await trx
 				.selectFrom("Badge")
@@ -224,34 +225,31 @@ export async function syncXPBadges() {
 
 			invariant(badge, `Badge ${value} not found`);
 
-			await trx
-				.deleteFrom("TournamentBadgeOwner")
-				.where("badgeId", "=", badge.id)
-				.execute();
+			badgeIdByValue.set(value, badge.id);
 		}
+
+		await trx
+			.deleteFrom("TournamentBadgeOwner")
+			.where("badgeId", "in", [...badgeIdByValue.values()])
+			.execute();
 
 		const userTopXPowers = await trx
 			.selectFrom("SplatoonPlayer")
-			.select(["userId", "peakXp"])
+			.select(["userId", peakXpOverallSql().as("peakXp")])
 			.where("userId", "is not", null)
 			.where("peakXp", "is not", null)
 			.$narrowType<{ userId: NotNull; peakXp: NotNull }>()
 			.execute();
 
-		for (const { userId, peakXp } of userTopXPowers) {
+		const badgeOwners = userTopXPowers.flatMap(({ userId, peakXp }) => {
 			const badgeValue = findSplatoon3XpBadgeValue(peakXp!);
-			if (!badgeValue) continue;
+			const badgeId = badgeValue ? badgeIdByValue.get(badgeValue) : undefined;
 
-			await trx
-				.insertInto("TournamentBadgeOwner")
-				.values((eb) => ({
-					badgeId: eb
-						.selectFrom("Badge")
-						.select("id")
-						.where("code", "=", String(badgeValue)),
-					userId,
-				}))
-				.execute();
-		}
+			return badgeId ? [{ badgeId, userId }] : [];
+		});
+
+		if (badgeOwners.length === 0) return;
+
+		await trx.insertInto("TournamentBadgeOwner").values(badgeOwners).execute();
 	});
 }

@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { subMonths } from "date-fns";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLoaderData } from "react-router";
@@ -14,12 +15,14 @@ import { LocaleTimeRange } from "~/components/LocaleTimeRange";
 import { navItems } from "~/components/layout/nav-items";
 import { Main } from "~/components/Main";
 import { Config } from "~/config";
+import { useUser } from "~/features/auth/core/user";
 import { TournamentCard } from "~/features/calendar/components/TournamentCard";
 import { PWAInstallBanner } from "~/features/front-page/components/PWAInstallBanner";
 import { SplatoonRotations } from "~/features/front-page/components/SplatoonRotations";
 import type * as Changelog from "~/features/front-page/core/Changelog.server";
 import * as Seasons from "~/features/mmr/core/Seasons";
 import styles from "~/styles/front.module.css";
+import { databaseTimestampToDate } from "~/utils/dates";
 import type { SendouRouteHandle } from "~/utils/remix.server";
 import {
 	BLANK_IMAGE_URL,
@@ -29,6 +32,7 @@ import {
 	navIconUrl,
 	SENDOUQ_PAGE,
 	sqHeaderGuyImageUrl,
+	WELCOME_PAGE,
 } from "~/utils/urls";
 import { type LeaderboardEntry, loader } from "../loaders/index.server";
 
@@ -98,6 +102,7 @@ function SeasonBanner() {
 					className={styles.seasonBannerImg}
 					path={sqHeaderGuyImageUrl(season.nth)}
 					alt=""
+					loading="eager"
 				/>
 			</Link>
 			<Link to={SENDOUQ_PAGE} className={styles.seasonBannerLink}>
@@ -131,6 +136,7 @@ function SeasonCard() {
 					className={styles.seasonCardImg}
 					path={sqHeaderGuyImageUrl(season.nth)}
 					alt=""
+					loading="eager"
 				/>
 			</Link>
 			<Link to={SENDOUQ_PAGE} className={styles.seasonCardButton}>
@@ -138,6 +144,24 @@ function SeasonCard() {
 				{isInFuture ? t("front:sq.prepare") : t("front:sq.participate")}
 			</Link>
 		</div>
+	);
+}
+
+function WelcomeBanner() {
+	const { t } = useTranslation(["front"]);
+	const user = useUser();
+
+	const isNewUser =
+		typeof user?.createdAt === "number" &&
+		databaseTimestampToDate(user.createdAt) > subMonths(new Date(), 6);
+
+	if (user && !isNewUser) return null;
+
+	return (
+		<Link to={WELCOME_PAGE} className={styles.welcomeBanner}>
+			{t("front:welcomeBanner")}
+			<ArrowRightIcon />
+		</Link>
 	);
 }
 
@@ -164,7 +188,11 @@ function TournamentShowcase() {
 		<div className={styles.tournamentCards}>
 			<div className={clsx(styles.tournamentCardsSpacer, "scrollbar")}>
 				{data.tournaments.showcase.map((tournament) => (
-					<TournamentCard key={tournament.id} tournament={tournament} />
+					<TournamentCard
+						key={tournament.id}
+						tournament={tournament}
+						timeFormat="absolute"
+					/>
 				))}
 			</div>
 			<Link to={CALENDAR_PAGE} className={styles.tournamentCardsViewAllCard}>
@@ -334,6 +362,7 @@ function DiscoverFeatures() {
 					</Link>
 				))}
 			</nav>
+			<WelcomeBanner />
 			<PWAInstallBanner />
 		</div>
 	);
@@ -390,6 +419,7 @@ function ChangelogItem({ item }: { item: Changelog.ChangelogItem }) {
 								src={image.thumb}
 								alt=""
 								className={styles.changeLogImg}
+								loading="lazy"
 							/>
 						))}
 					</div>

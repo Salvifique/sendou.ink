@@ -6,6 +6,7 @@ import { SendouButton } from "~/components/elements/Button";
 import { SendouPopover } from "~/components/elements/Popover";
 import { Flag } from "~/components/Flag";
 import { Image, ModeImage } from "~/components/Image";
+import { LocaleTime } from "~/components/LocaleTime";
 import { TierPill } from "~/components/TierPill";
 import { BadgeDisplay } from "~/features/badges/components/BadgeDisplay";
 import { useFormatDistanceToNow } from "~/hooks/intl/useFormatDistanceToNow";
@@ -20,9 +21,11 @@ import styles from "./TournamentCard.module.css";
 export function TournamentCard({
 	tournament,
 	className,
+	timeFormat = "relative",
 }: {
 	tournament: CalendarEvent | ShowcaseCalendarEvent;
 	className?: string;
+	timeFormat?: "relative" | "absolute";
 }) {
 	const isHydrated = useHydrated();
 	const formatDistanceToNow = useFormatDistanceToNow();
@@ -33,7 +36,7 @@ export function TournamentCard({
 	const isHostedOnSendouInk = typeof tournament.isRanked === "boolean";
 
 	const startDate = isShowcase
-		? databaseTimestampToDate(tournament.startTime)
+		? databaseTimestampToDate(tournament.startsAt)
 		: null;
 
 	return (
@@ -54,6 +57,7 @@ export function TournamentCard({
 								height={32}
 								className={styles.avatarImg}
 								alt=""
+								loading="lazy"
 							/>
 						</div>
 					) : null}
@@ -84,16 +88,30 @@ export function TournamentCard({
 					) : null}
 				</div>
 				{startDate ? (
-					<time
-						className={clsx(styles.time, {
-							invisible: !isHydrated,
-						})}
-						dateTime={startDate.toISOString()}
-					>
-						{isHydrated
-							? formatDistanceToNow(startDate, { addSuffix: true })
-							: "Placeholder"}
-					</time>
+					timeFormat === "absolute" ? (
+						<LocaleTime
+							date={startDate}
+							className={styles.time}
+							options={{
+								month: "short",
+								day: "numeric",
+								weekday: "short",
+								hour: "numeric",
+								minute: "numeric",
+							}}
+						/>
+					) : (
+						<time
+							className={clsx(styles.time, {
+								invisible: !isHydrated,
+							})}
+							dateTime={startDate.toISOString()}
+						>
+							{isHydrated
+								? formatDistanceToNow(startDate, { addSuffix: true })
+								: "Placeholder"}
+						</time>
+					)
 				) : null}
 				{isCalendar ? (
 					<div className="stack sm items-center my-2">
@@ -191,13 +209,14 @@ function TournamentFirstPlacerWithMembers({
 						alt=""
 						width={24}
 						className="rounded-full"
+						loading="lazy"
 					/>
 				) : null}{" "}
 				<div className="stack items-start">
 					<span className={styles.firstPlacersTeamName}>
 						{censored ? "???" : placer.teamName}
 					</span>
-					<div className="text-xxxs text-lighter font-bold text-uppercase">
+					<div className="text-xxs text-lighter font-bold text-uppercase">
 						{t("front:showcase.card.winner")}
 						{placer.div ? ` (${placer.div})` : null}
 					</div>
@@ -236,7 +255,7 @@ function TournamentFirstPlacerTeamNameOnly({
 			<span className={styles.firstPlacersTeamName}>
 				{censored ? "???" : placer.teamName}
 			</span>
-			<div className="text-xxxs text-lighter font-bold text-uppercase">
+			<div className="text-xxs text-lighter font-bold text-uppercase">
 				{t("front:showcase.card.winner")}
 				{placer.div ? ` (${placer.div})` : null}
 			</div>

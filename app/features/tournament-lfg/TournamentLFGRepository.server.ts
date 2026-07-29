@@ -3,6 +3,7 @@ import { jsonBuildObject } from "kysely/helpers/sqlite";
 import { db } from "~/db/sql";
 import type { DB, Tables } from "~/db/tables";
 import { actorId } from "~/features/auth/core/user.server";
+import { databaseTimestampNow } from "~/utils/dates";
 import { shortNanoid } from "~/utils/id";
 import invariant from "~/utils/invariant";
 import {
@@ -31,7 +32,7 @@ type CreatePlaceholderTeamArgs = {
 	isStayAsSub?: boolean;
 	lfgNote?: string;
 };
-export function createPlaceholderTeam(args: CreatePlaceholderTeamArgs) {
+export function insertPlaceholderTeam(args: CreatePlaceholderTeamArgs) {
 	return db.transaction().execute(async (trx) => {
 		const createdTeam = await trx
 			.insertInto("TournamentTeam")
@@ -201,6 +202,8 @@ export function mergeTeams({
 				.set({
 					role: member.role === "OWNER" ? "MANAGER" : member.role,
 					tournamentTeamId: survivingTeamId,
+					// reset so the merged-in members sort after the surviving team's original members
+					createdAt: databaseTimestampNow(),
 				})
 				.where("TournamentTeamMember.tournamentTeamId", "=", otherTeamId)
 				.where("TournamentTeamMember.userId", "=", member.userId)
@@ -239,7 +242,7 @@ export function mergeTeams({
 	});
 }
 
-export async function addLike({
+export async function insertLike({
 	likerTeamId,
 	targetTeamId,
 }: {
@@ -276,7 +279,7 @@ export function deleteLike({
 		.execute();
 }
 
-export async function allLikesByTeamId(teamId: number) {
+export async function findAllLikesByTeamId(teamId: number) {
 	const rows = await db
 		.selectFrom("TournamentLFGLike")
 		.select(["TournamentLFGLike.likerTeamId", "TournamentLFGLike.targetTeamId"])
@@ -396,7 +399,7 @@ export function leaveLfg({
 	});
 }
 
-export async function getSubsForTournament(tournamentId: number) {
+export async function findAllSubsByTournamentId(tournamentId: number) {
 	const rows = await db
 		.selectFrom("TournamentTeamMember")
 		.innerJoin(

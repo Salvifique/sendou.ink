@@ -196,7 +196,6 @@ export default function MatchPageTestRoute() {
 										discordAvatar: null,
 										customUrl: "sendou",
 										tier: { name: "LEVIATHAN", isPlus: true },
-										plusTier: 1,
 										weaponPool: [0, 2000, 4000],
 										customAvatarUrl: null,
 									},
@@ -207,7 +206,6 @@ export default function MatchPageTestRoute() {
 										discordAvatar: null,
 										customUrl: null,
 										tier: { name: "DIAMOND", isPlus: false },
-										plusTier: 2,
 										weaponPool: [20, 1100],
 										customAvatarUrl: null,
 									},
@@ -250,7 +248,6 @@ export default function MatchPageTestRoute() {
 										discordAvatar: null,
 										customUrl: null,
 										tier: { name: "PLATINUM", isPlus: false },
-										plusTier: 3,
 										weaponPool: [40, 3000],
 										customAvatarUrl: null,
 									},
@@ -293,7 +290,7 @@ export default function MatchPageTestRoute() {
 							ownTeamId={1}
 							stageId={4}
 							mode="SZ"
-							withPoints={true}
+							withKo={true}
 							actionButtons={
 								<SendouButton
 									variant="minimal-destructive"
@@ -691,7 +688,7 @@ export default function MatchPageTestRoute() {
 								mode: "RM",
 								timestamp: 1712856200,
 								winner: "ALPHA",
-								points: [100, 42],
+								ko: true,
 								weapons: {
 									alpha: [40, null, 1100, 3040],
 									bravo: [null, 210, null, 4010],

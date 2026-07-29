@@ -10,12 +10,12 @@ import {
 } from "~/features/sendouq-match/core/match.server";
 import * as SQMatchRepository from "~/features/sendouq-match/SQMatchRepository.server";
 import { refreshStreamsCache } from "~/features/sendouq-streams/core/streams.server";
-import { errorToastIfFalsy, parseRequestPayload } from "~/utils/remix.server";
+import { parseFormData } from "~/form/parse.server";
+import { errorToastIfFalsy } from "~/utils/remix.server";
 import { assertUnreachable } from "~/utils/types";
 import { navIconUrl, SENDOUQ_PAGE, sendouQMatchPage } from "~/utils/urls";
 import { groupAfterMorph } from "../core/groups";
 import { refreshSendouQInstance, SendouQ } from "../core/SendouQ.server";
-import * as PrivateUserNoteRepository from "../PrivateUserNoteRepository.server";
 import { SENDOUQ_LOOKING_ROOM, sqGroupWebsocketRoom } from "../q-constants";
 import { lookingSchema } from "../q-schemas.server";
 import { resolveFutureMatchModes } from "../q-utils";
@@ -26,10 +26,17 @@ import { SendouQError, setGroupChatMetadata } from "../q-utils.server";
 // and when we return null we just force a refresh
 export const action: ActionFunction = async ({ request }) => {
 	const user = requireUser();
-	const data = await parseRequestPayload({
+	const result = await parseFormData({
 		request,
 		schema: lookingSchema,
 	});
+
+	if (!result.success) {
+		return { fieldErrors: result.fieldErrors };
+	}
+
+	const data = result.data;
+
 	const currentGroup = SendouQ.findOwnGroup(user.id);
 	if (!currentGroup) return null;
 
@@ -64,7 +71,7 @@ export const action: ActionFunction = async ({ request }) => {
 			case "LIKE": {
 				if (!isGroupManager()) return null;
 
-				await SQGroupRepository.addLike({
+				await SQGroupRepository.insertLike({
 					likerGroupId: currentGroup.id,
 					targetGroupId: data.targetGroupId,
 				});
@@ -102,7 +109,7 @@ export const action: ActionFunction = async ({ request }) => {
 			case "GROUP_UP": {
 				if (!isGroupManager()) return null;
 
-				const allLikes = await SQGroupRepository.allLikesByGroupId(
+				const allLikes = await SQGroupRepository.findAllLikesByGroupId(
 					data.targetGroupId,
 				);
 				if (!allLikes.given.some((like) => like.groupId === currentGroup.id)) {
@@ -157,9 +164,11 @@ export const action: ActionFunction = async ({ request }) => {
 				if (!ownGroup || !theirGroup) return null;
 
 				const ownGroupPreferences =
-					await SQGroupRepository.mapModePreferencesByGroupId(ownGroup.id);
+					await SQGroupRepository.findMapModePreferencesByGroupId(ownGroup.id);
 				const theirGroupPreferences =
-					await SQGroupRepository.mapModePreferencesByGroupId(theirGroup.id);
+					await SQGroupRepository.findMapModePreferencesByGroupId(
+						theirGroup.id,
+					);
 
 				const modesIncluded = resolveFutureMatchModes(ownGroup, theirGroup);
 
@@ -175,11 +184,11 @@ export const action: ActionFunction = async ({ request }) => {
 					modesIncluded,
 				);
 
-				const createdMatch = await SQMatchRepository.create({
+				const createdMatch = await SQMatchRepository.insert({
 					alphaGroupId: ownGroup.id,
 					bravoGroupId: theirGroup.id,
 					mapList,
-					memento: createMatchMemento({
+					memento: await createMatchMemento({
 						own: { group: ownGroup, preferences: ownGroupPreferences },
 						their: { group: theirGroup, preferences: theirGroupPreferences },
 						mapList,
@@ -328,11 +337,6 @@ export const action: ActionFunction = async ({ request }) => {
 				await refreshSendouQInstance();
 
 				broadcastLookingUpdate();
-
-				break;
-			}
-			case "DELETE_PRIVATE_USER_NOTE": {
-				await PrivateUserNoteRepository.deleteOwnNoteById(data.targetId);
 
 				break;
 			}

@@ -4,6 +4,7 @@ import { db } from "~/db/sql";
 import type { Tables } from "~/db/tables";
 import { modesShort } from "~/modules/in-game-lists/modes";
 import type { MainWeaponId } from "~/modules/in-game-lists/types";
+import { peakXpOverallSql } from "~/utils/kysely.server";
 
 export function unlinkPlayerByUserId(userId: number) {
 	return db
@@ -11,6 +12,33 @@ export function unlinkPlayerByUserId(userId: number) {
 		.set({ userId: null })
 		.where("SplatoonPlayer.userId", "=", userId)
 		.execute();
+}
+
+/** Whether the user has a linked Splatoon player (i.e. has claimed their X Rank results). */
+export async function isPlayerLinkedByUserId(userId: number): Promise<boolean> {
+	const player = await db
+		.selectFrom("SplatoonPlayer")
+		.select("SplatoonPlayer.id")
+		.where("SplatoonPlayer.userId", "=", userId)
+		.executeTakeFirst();
+
+	return Boolean(player);
+}
+
+/**
+ * The user's verified peak XP, read from their linked player's denormalized `SplatoonPlayer.peakXp`
+ * column (see {@link refreshAllPeakXp}). `null` when they have no linked player or no placements.
+ */
+export async function findPeakVerifiedXpByUserId(
+	userId: Tables["User"]["id"],
+): Promise<number | null> {
+	const row = await db
+		.selectFrom("SplatoonPlayer")
+		.where("SplatoonPlayer.userId", "=", userId)
+		.select(peakXpOverallSql().as("overall"))
+		.executeTakeFirst();
+
+	return row?.overall ?? null;
 }
 
 function xRankPlacementsQueryBase() {
@@ -77,7 +105,7 @@ export async function findPlacementsByUserId(
 	return result.length ? result : null;
 }
 
-export async function monthYears() {
+export async function findAllMonthYears() {
 	return await db
 		.selectFrom("XRankPlacement")
 		.select(["month", "year"])
@@ -132,12 +160,23 @@ export type FindPlacement = InferResult<
 export async function refreshAllPeakXp() {
 	await db
 		.updateTable("SplatoonPlayer")
-		.set((eb) => ({
-			peakXp: eb
-				.selectFrom("XRankPlacement")
-				.select((eb) => eb.fn.max("XRankPlacement.power").as("peakXp"))
-				.whereRef("XRankPlacement.playerId", "=", "SplatoonPlayer.id"),
-		}))
+		.set({
+			// denormalized PeakXP json: overall + per-division peaks
+			// (region WEST = Tentatek, otherwise Takoroka). null when no placements.
+			peakXp: sql<string | null>`(
+				select iif(
+					max("XRankPlacement"."power") is null,
+					null,
+					json_object(
+						'overall', max("XRankPlacement"."power"),
+						'tentatek', max(iif("XRankPlacement"."region" = 'WEST', "XRankPlacement"."power", null)),
+						'takoroka', max(iif("XRankPlacement"."region" != 'WEST', "XRankPlacement"."power", null))
+					)
+				)
+				from "XRankPlacement"
+				where "XRankPlacement"."playerId" = "SplatoonPlayer"."id"
+			)`,
+		})
 		.execute();
 }
 

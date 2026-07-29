@@ -5,7 +5,10 @@ import type {
 	SpecialWeaponId,
 	SubWeaponId,
 } from "~/modules/in-game-lists/types";
-import type { DAMAGE_TYPE } from "./analyzer-constants";
+import type {
+	DAMAGE_TYPE,
+	TENACITY_PLAYER_DEFICITS,
+} from "./analyzer-constants";
 import type { SPECIAL_EFFECTS } from "./core/specialEffects";
 import type { weaponParams } from "./data/weapon-params";
 
@@ -188,6 +191,23 @@ export type SpecialWeaponParams = SpecialWeaponParamsObject[SpecialWeaponId] & {
 	BumpDamage?: number;
 	JumpDamage?: number;
 	TickDamage?: number;
+
+	// Map planner range circle params (populated by scripts/create-analyzer-json.ts).
+	/** Effect radius for area specials (Big Bubbler, Ink Storm, ...) */
+	Range_Radius?: number;
+	/** Straight-flight range for projectile specials with a fixed distance (Inkjet) */
+	Range_Distance?: number;
+	/** Outer blast radius drawn around a projectile special's impact */
+	Range_BlastRadius?: number;
+	/** Projectile trajectory params (Trizooka, Crab Tank); see comp-analyzer weapon-range */
+	Range_SpawnSpeed?: number;
+	Range_GoStraightStateEndMaxSpeed?: number;
+	Range_GoStraightToBrakeStateFrame?: number;
+	Range_FreeGravity?: number;
+	Range_FreeAirResist?: number;
+	Range_BrakeAirResist?: number;
+	Range_BrakeGravity?: number;
+	Range_BrakeToFreeStateFrame?: number;
 };
 
 export type ParamsJson = {
@@ -240,6 +260,8 @@ export interface FullInkTankOption {
 
 export type DamageType = (typeof DAMAGE_TYPE)[number];
 
+export type TenacityPlayerDeficit = (typeof TENACITY_PLAYER_DEFICITS)[number];
+
 export interface Damage {
 	value: number;
 	type: DamageType;
@@ -267,6 +289,8 @@ export interface AnalyzedBuild {
 		specialPoint: Stat;
 		specialLost: Stat;
 		specialLostSplattedByRP: Stat;
+		/** Seconds it takes Tenacity to fill the special gauge, keyed by how many active players the user's team is down. Only set if the build has Tenacity. */
+		tenacitySecondsToSpecial?: Record<TenacityPlayerDeficit, number>;
 		mainWeaponWhiteInkSeconds?: number;
 		subWeaponWhiteInkSeconds: number;
 		subWeaponInkConsumptionPercentage: Stat;

@@ -15,7 +15,6 @@ import { databaseTimestampToJavascriptTimestamp } from "~/utils/dates";
 import { tournamentTeamPage } from "~/utils/urls";
 import type { TournamentMatchLoaderData } from "../loaders/to.$id.matches.$mid.server";
 import { type MatchPageTeam, useMatch } from "../match-page-context";
-import { resolveHostingTeam } from "../tournament-match-utils";
 import { TournamentMatchActionPickBanTab } from "./TournamentMatchActionPickBanTab";
 import { TournamentMatchActionTab } from "./TournamentMatchActionTab";
 import { TournamentMatchAdminTab } from "./TournamentMatchAdminTab";
@@ -154,9 +153,6 @@ function resolveTimelineMaps(
 			}));
 
 	return data.results.map((result, mapIndex) => {
-		const hasPoints =
-			result.opponentOnePoints !== null && result.opponentTwoPoints !== null;
-
 		const alphaRoster = resolveRoster(result.participants, opponentOneId);
 		const bravoRoster = resolveRoster(result.participants, opponentTwoId);
 
@@ -186,12 +182,7 @@ function resolveTimelineMaps(
 			weapons: hasAnyWeapon
 				? { alpha: alphaWeapons, bravo: bravoWeapons }
 				: undefined,
-			points: hasPoints
-				? ([result.opponentOnePoints, result.opponentTwoPoints] as [
-						number,
-						number,
-					])
-				: undefined,
+			ko: result.ko != null ? Boolean(result.ko) : undefined,
 		};
 	});
 }
@@ -236,6 +227,7 @@ function resolveTimelinePickBanData(
 			maps,
 			teams: pickBanTeamsLite,
 			results: data.results,
+			matchId: data.match.id,
 		});
 		if (teamId === null) continue;
 
@@ -321,9 +313,6 @@ function TournamentMatchRosterTab({
 
 	const tbdTeam = { defaultName: t("tournament:match.tbd"), members: [] };
 
-	const hostingTeamId =
-		teamOne && teamTwo ? resolveHostingTeam([teamOne, teamTwo]).id : null;
-
 	return (
 		<MatchRosterTab
 			minMembersPerTeam={tournament.minMembersPerTeam}
@@ -377,7 +366,6 @@ function TournamentMatchRosterTab({
 			})),
 			subbedOut,
 			seed: team.seed,
-			isHost: hostingTeamId === team.id,
 		};
 	}
 

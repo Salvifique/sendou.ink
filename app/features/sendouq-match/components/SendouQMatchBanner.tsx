@@ -109,9 +109,7 @@ export function SendouQMatchBanner({ data }: { data: SendouQMatchLoaderData }) {
 				<MatchBanner
 					stageId={currentMap.stageId}
 					mode={currentMap.mode}
-					screenLegal={
-						!data.match.groupAlpha.noScreen && !data.match.groupBravo.noScreen
-					}
+					screenLegal={!data.match.noScreen}
 					joinPool={joinPool}
 					joinPass={joinPass}
 				>
@@ -156,7 +154,14 @@ function SendouQMatchBannerTopRow({
 			}}
 		>
 			{data.match.isLocked || awaitingConfirmation ? (
-				<MatchBannerStartedAt time={startedAt} />
+				<MatchBannerStartedAt
+					time={startedAt}
+					endTime={
+						lastMapReportedAt
+							? databaseTimestampToDate(lastMapReportedAt)
+							: null
+					}
+				/>
 			) : (
 				<MatchBannerTimer
 					time={{

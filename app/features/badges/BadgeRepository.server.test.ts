@@ -10,8 +10,8 @@ describe("syncXPBadges", () => {
 		await insertXPBadges();
 	});
 
-	afterEach(() => {
-		dbReset();
+	afterEach(async () => {
+		await dbReset();
 	});
 
 	test("assigns badge to user with qualifying peakXp", async () => {
@@ -65,11 +65,25 @@ async function insertSplatoonPlayer(args: {
 	userId: number | null;
 	peakXp: number | null;
 }) {
-	await db.insertInto("SplatoonPlayer").values(args).execute();
+	await db
+		.insertInto("SplatoonPlayer")
+		.values({
+			splId: args.splId,
+			userId: args.userId,
+			peakXp:
+				args.peakXp === null
+					? null
+					: JSON.stringify({
+							overall: args.peakXp,
+							tentatek: args.peakXp,
+							takoroka: null,
+						}),
+		})
+		.execute();
 }
 
 async function findBadgeByCode(code: string) {
-	const badges = await BadgeRepository.all();
+	const badges = await BadgeRepository.findAll();
 	const badge = badges.find((b) => b.code === code);
 	if (!badge) return null;
 	return BadgeRepository.findById(badge.id);

@@ -20,7 +20,13 @@ import {
 } from "react-aria-components";
 import { Flipped, Flipper } from "react-flip-toolkit";
 import { useTranslation } from "react-i18next";
-import { Link, useFetcher, useLocation, useMatches } from "react-router";
+import {
+	Link,
+	useFetcher,
+	useLocation,
+	useMatches,
+	useSearchParams,
+} from "react-router";
 import { Config } from "~/config";
 import { useUser } from "~/features/auth/core/user";
 import { useChatContext } from "~/features/chat/useChatContext";
@@ -40,7 +46,7 @@ import {
 	SETTINGS_PAGE,
 	userPage,
 } from "~/utils/urls";
-import { Avatar } from "../Avatar";
+import { Avatar, generateIdenticon } from "../Avatar";
 import { SendouButton } from "../elements/Button";
 import { SendouPopover } from "../elements/Popover";
 import { FuseZone } from "../fuse/Fuse";
@@ -50,7 +56,6 @@ import { NotificationDot } from "../NotificationDot";
 import { ListLink, SideNav, SideNavFooter, SideNavHeader } from "../SideNav";
 import sideNavStyles from "../SideNav.module.css";
 import { StreamListItems } from "../StreamListItems";
-import { AuthErrorDialog } from "./AuthErrorDialog";
 import { ChatSidebar } from "./ChatSidebar";
 import { Footer } from "./Footer";
 import styles from "./index.module.css";
@@ -61,6 +66,14 @@ import { TopNavMenus } from "./TopNavMenus";
 import { TopRightButtons } from "./TopRightButtons";
 
 const MAX_DESKTOP_FRIENDS = 4;
+
+// lazy loaded so the rarely needed auth error dialog stays out of the eager
+// bundle loaded on every page
+const AuthErrorDialog = React.lazy(() =>
+	import("./AuthErrorDialog").then((module) => ({
+		default: module.AuthErrorDialog,
+	})),
+);
 
 /** Id of the loading-bar track rendered inside the header. NProgress mounts its
  * bar into it; the track sits just below the header border, spans only the area
@@ -240,6 +253,7 @@ export function Layout({
 	const { formatRelativeDate } = useRelativeDayFormat();
 	const isHydrated = useHydrated();
 	const location = useLocation();
+	const [searchParams] = useSearchParams();
 	const headerRef = React.useRef<HTMLElement>(null);
 	const navOffset = useNavOffset(headerRef);
 
@@ -255,7 +269,6 @@ export function Layout({
 		return () => window.removeEventListener("resize", handleResize);
 	}, []);
 
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally close modals on navigation
 	React.useEffect(() => {
 		setSideNavModalOpen(false);
 		setChatSidebarModalOpen(false);
@@ -307,7 +320,7 @@ export function Layout({
 						imageUrl={event.logoUrl ?? undefined}
 						subtitle={
 							isHydrated ? (
-								formatRelativeDate(event.startTime)
+								formatRelativeDate(event.startsAt)
 							) : (
 								<span className="invisible">Placeholder</span>
 							)
@@ -489,7 +502,11 @@ export function Layout({
 					<ChatSidebar onClose={() => setChatSidebarOpen(false)} />
 				</div>
 			) : null}
-			<AuthErrorDialog />
+			{searchParams.has("authError") ? (
+				<React.Suspense>
+					<AuthErrorDialog />
+				</React.Suspense>
+			) : null}
 		</>
 	);
 }
@@ -602,22 +619,39 @@ function SideNavCollapseButton({
 }
 
 function PageIcon({ crumb }: { crumb: Breadcrumb }) {
+	const [isErrored, setIsErrored] = React.useState(false);
+	const isClient = useHydrated();
+
 	if (crumb.type !== "IMAGE") {
 		return null;
 	}
 
-	const isExternal = crumb.imgPath.includes(".");
+	const lastPathSegment = crumb.imgPath.split("/").pop() ?? "";
+	const isExternal = lastPathSegment.includes(".");
 	const iconClass = clsx(styles.pageIcon, "rounded");
+
+	// an <img> can finish loading (and fail) before React hydrates and attaches onError, so that
+	// error is missed — re-check on mount and fall back manually so SSR'd icons still heal
+	const checkAlreadyErrored = (img: HTMLImageElement | null) => {
+		if (img?.complete && img.naturalWidth === 0) setIsErrored(true);
+	};
+
+	const identiconSrc =
+		isErrored && isClient && crumb.identiconInput
+			? generateIdenticon(crumb.identiconInput, 28, 7)
+			: null;
 
 	return (
 		<div className={styles.pageIconWrapper}>
 			{isExternal ? (
 				<img
-					src={crumb.imgPath}
+					ref={checkAlreadyErrored}
+					src={identiconSrc ?? crumb.imgPath}
 					alt=""
 					className={iconClass}
 					width={28}
 					height={28}
+					onError={() => setIsErrored(true)}
 				/>
 			) : (
 				<Image

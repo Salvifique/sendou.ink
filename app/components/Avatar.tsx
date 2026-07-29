@@ -42,7 +42,7 @@ function generateColors(hash: number) {
 	};
 }
 
-function generateIdenticon(input: string, size = 128, gridSize = 5) {
+export function generateIdenticon(input: string, size = 128, gridSize = 5) {
 	const cacheKey = `${input}-${size}-${gridSize}`;
 	const cached = identiconCache.get(cacheKey);
 	if (cached) return cached;
@@ -108,6 +108,7 @@ export function Avatar({
 	size = "sm",
 	className,
 	alt = "",
+	loading = "lazy",
 	...rest
 }: {
 	user?: Pick<Tables["User"], "discordId" | "discordAvatar"> & {
@@ -118,9 +119,16 @@ export function Avatar({
 	className?: string;
 	alt?: string;
 	size: keyof typeof dimensions;
+	loading?: "lazy" | "eager";
 } & React.ButtonHTMLAttributes<HTMLImageElement>) {
 	const [isErrored, setIsErrored] = React.useState(false);
 	const isClient = useHydrated();
+
+	// an <img> can finish loading (and fail) before React hydrates and attaches onError, so that
+	// error is missed — re-check on mount and fall back manually so SSR'd avatars still heal
+	const checkAlreadyErrored = (img: HTMLImageElement | null) => {
+		if (img?.complete && img.naturalWidth === 0) setIsErrored(true);
+	};
 
 	const identiconSource = identiconInput ?? user?.discordId ?? "unknown";
 
@@ -141,11 +149,13 @@ export function Avatar({
 	return (
 		<div className={clsx(styles.avatarWrapper, className)}>
 			<img
+				ref={checkAlreadyErrored}
 				src={src}
 				alt={alt}
 				title={alt ? alt : undefined}
 				width={dimensions[size]}
 				height={dimensions[size]}
+				loading={loading}
 				onError={() => setIsErrored(true)}
 				{...rest}
 			/>

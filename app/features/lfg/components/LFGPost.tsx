@@ -8,41 +8,37 @@ import { Divider } from "~/components/Divider";
 import { SendouButton } from "~/components/elements/Button";
 import { Flag } from "~/components/Flag";
 import { FormWithConfirm } from "~/components/FormWithConfirm";
-import { Image, TierImage, WeaponImage } from "~/components/Image";
+import { WeaponImage } from "~/components/Image";
 import { LocaleTime } from "~/components/LocaleTime";
+import { NoteAvatar } from "~/components/NoteAvatar";
 import { useUser } from "~/features/auth/core/user";
-import * as Seasons from "~/features/mmr/core/Seasons";
-import type { TieredSkill } from "~/features/mmr/tiered.server";
+import {
+	UserCard,
+	useUserCardData,
+} from "~/features/user-card/components/UserCard";
 import { useFormatDistanceToNow } from "~/hooks/intl/useFormatDistanceToNow";
 import { useHydrated } from "~/hooks/useHydrated";
+import type { UnifiedLanguageCode } from "~/modules/i18n/config";
 import { useHasRole } from "~/modules/permissions/hooks";
 import { databaseTimestampToDate } from "~/utils/dates";
-import { lfgNewPostPage, navIconUrl, userPage } from "~/utils/urls";
+import { lfgNewPostPage } from "~/utils/urls";
 import { hourDifferenceBetweenTimezones } from "../core/timezone";
-import type { LFGLoaderData, TiersMap } from "../routes/lfg";
+import type { LFGLoaderData } from "../routes/lfg";
 
 import styles from "./LFGPost.module.css";
 
 type Post = LFGLoaderData["posts"][number];
 
-export function LFGPost({
-	post,
-	tiersMap,
-}: {
-	post: Post;
-	tiersMap: TiersMap;
-}) {
+export function LFGPost({ post }: { post: Post }) {
 	if (post.team) {
-		return (
-			<TeamLFGPost post={{ ...post, team: post.team }} tiersMap={tiersMap} />
-		);
+		return <TeamLFGPost post={{ ...post, team: post.team }} />;
 	}
 
-	return <UserLFGPost post={post} tiersMap={tiersMap} />;
+	return <UserLFGPost post={post} />;
 }
 
 const USER_POST_EXPANDABLE_CRITERIA = 300;
-function UserLFGPost({ post, tiersMap }: { post: Post; tiersMap: TiersMap }) {
+function UserLFGPost({ post }: { post: Post }) {
 	const user = useUser();
 	const isAdmin = useHasRole("ADMIN");
 	const [isExpanded, setIsExpanded] = React.useState(false);
@@ -57,13 +53,7 @@ function UserLFGPost({ post, tiersMap }: { post: Post; tiersMap: TiersMap }) {
 				<PostTime createdAt={post.createdAt} updatedAt={post.updatedAt} />
 				<PostPills
 					languages={post.languages}
-					plusTier={post.author.plusTier}
 					timezone={post.timezone}
-					tiers={
-						post.type !== "COACH_FOR_TEAM"
-							? tiersMap.get(post.author.id)
-							: undefined
-					}
 					canEdit={post.author.id === user?.id}
 					postId={post.id}
 				/>
@@ -88,10 +78,8 @@ function UserLFGPost({ post, tiersMap }: { post: Post; tiersMap: TiersMap }) {
 
 function TeamLFGPost({
 	post,
-	tiersMap,
 }: {
 	post: Post & { team: NonNullable<Post["team"]> };
-	tiersMap: TiersMap;
 }) {
 	const isHydrated = useHydrated();
 	const user = useUser();
@@ -106,9 +94,9 @@ function TeamLFGPost({
 						<PostTeamLogoHeader team={post.team} />
 						<div className="stack horizontal items-center sm">
 							{isHydrated && <PostTimezonePill timezone={post.timezone} />}
-							{post.languages && (
+							{post.languages ? (
 								<PostLanguagePill languages={post.languages} />
-							)}
+							) : null}
 						</div>
 					</div>
 					<Divider />
@@ -120,13 +108,9 @@ function TeamLFGPost({
 					</div>
 				</div>
 				{isExpanded ? (
-					<PostTeamMembersFull
-						team={post.team}
-						tiersMap={tiersMap}
-						postId={post.id}
-					/>
+					<PostTeamMembersFull team={post.team} />
 				) : (
-					<PostTeamMembersPeek team={post.team} tiersMap={tiersMap} />
+					<PostTeamMembersPeek team={post.team} />
 				)}
 			</div>
 			<div>
@@ -155,42 +139,21 @@ function PostTeamLogoHeader({ team }: { team: NonNullable<Post["team"]> }) {
 	);
 }
 
-function PostTeamMembersPeek({
-	team,
-	tiersMap,
-}: {
-	team: NonNullable<Post["team"]>;
-	tiersMap: TiersMap;
-}) {
+function PostTeamMembersPeek({ team }: { team: NonNullable<Post["team"]> }) {
 	return (
 		<div className="stack sm xs-row horizontal flex-wrap">
 			{team.members.map((member) => (
-				<PostTeamMember key={member.id} member={member} tiersMap={tiersMap} />
+				<PostTeamMember key={member.id} member={member} />
 			))}
 		</div>
 	);
 }
 
-function PostTeamMembersFull({
-	team,
-	tiersMap,
-	postId,
-}: {
-	team: NonNullable<Post["team"]>;
-	tiersMap: TiersMap;
-	postId: number;
-}) {
+function PostTeamMembersFull({ team }: { team: NonNullable<Post["team"]> }) {
 	return (
 		<div className="stack lg">
 			{team.members.map((member) => (
-				<div key={member.id} className="stack sm">
-					<PostUserHeader author={member} includeWeapons />
-					<PostPills
-						plusTier={member.plusTier}
-						tiers={tiersMap.get(member.id)}
-						postId={postId}
-					/>
-				</div>
+				<PostUserHeader key={member.id} author={member} includeWeapons />
 			))}
 		</div>
 	);
@@ -198,23 +161,21 @@ function PostTeamMembersFull({
 
 function PostTeamMember({
 	member,
-	tiersMap,
 }: {
 	member: NonNullable<Post["team"]>["members"][number];
-	tiersMap: TiersMap;
 }) {
-	const tiers = tiersMap.get(member.id);
-	const tier = tiers?.latest ?? tiers?.previous;
+	const cardData = useUserCardData(member.id);
 
 	return (
 		<div className="stack sm items-center flex-same-size">
-			<div className="stack sm items-center">
-				<Avatar size="xs" user={member} />
-				<Link to={userPage(member)} className={styles.teamMemberName}>
-					{member.username}
-				</Link>
-				{tier ? <TierImage tier={tier} width={32} /> : null}
-			</div>
+			<UserCard userId={member.id} withMutualFriends>
+				<span className="stack sm items-center">
+					<NoteAvatar sentiment={cardData?.privateNote?.sentiment} size="sm">
+						<Avatar size="xs" user={member} />
+					</NoteAvatar>
+					<span className={styles.teamMemberName}>{member.username}</span>
+				</span>
+			</UserCard>
 		</div>
 	);
 }
@@ -226,17 +187,24 @@ function PostUserHeader({
 	author: Post["author"];
 	includeWeapons: boolean;
 }) {
+	const cardData = useUserCardData(author.id);
+
 	return (
 		<div className="stack sm">
 			<div className="stack sm horizontal items-center">
-				<Avatar size="xsm" user={author} />
-				<div>
-					<div className="stack horizontal sm items-center text-md font-bold">
-						<Link to={userPage(author)} className={styles.userName}>
-							{author.username}
-						</Link>{" "}
-						{author.country ? <Flag countryCode={author.country} tiny /> : null}
-					</div>
+				<div className="stack horizontal sm items-center text-md font-bold">
+					<UserCard userId={author.id} withMutualFriends>
+						<span className="stack sm horizontal items-center">
+							<NoteAvatar
+								sentiment={cardData?.privateNote?.sentiment}
+								size="md"
+							>
+								<Avatar size="xsm" user={author} />
+							</NoteAvatar>
+							<span className={styles.userName}>{author.username}</span>
+						</span>
+					</UserCard>{" "}
+					{author.country ? <Flag countryCode={author.country} tiny /> : null}
 				</div>
 			</div>
 			{includeWeapons ? (
@@ -291,16 +259,12 @@ function PostTime({
 
 function PostPills({
 	timezone,
-	plusTier,
 	languages,
-	tiers,
 	canEdit,
 	postId,
 }: {
 	timezone?: string | null;
-	plusTier?: number | null;
-	languages?: string | null;
-	tiers?: NonNullable<ReturnType<TiersMap["get"]>>;
+	languages?: UnifiedLanguageCode[] | null;
 	canEdit?: boolean;
 	postId: number;
 }) {
@@ -316,13 +280,7 @@ function PostPills({
 				<PostTimezonePill timezone={timezone} />
 			)}
 			{!isHydrated && <PostTimezonePillPlaceholder />}
-			{typeof plusTier === "number" && (
-				<PostPlusServerPill plusTier={plusTier} />
-			)}
-			{tiers && <PostSkillPills tiers={tiers} />}
-			{typeof languages === "string" && (
-				<PostLanguagePill languages={languages} />
-			)}
+			{languages ? <PostLanguagePill languages={languages} /> : null}
 			{canEdit && <PostEditButton id={postId} />}
 		</div>
 	);
@@ -330,66 +288,6 @@ function PostPills({
 
 function PostTimezonePillPlaceholder() {
 	return <div className={clsx(styles.pill, styles.pillPlaceholder)} />;
-}
-
-const currentSeasonNth = Seasons.currentOrPrevious()!.nth;
-
-function PostSkillPills({
-	tiers,
-}: {
-	tiers: NonNullable<ReturnType<TiersMap["get"]>>;
-}) {
-	const hasBoth = tiers.latest && tiers.previous;
-
-	return (
-		<div className="stack xxxs horizontal">
-			{tiers.latest ? (
-				<PostSkillPill
-					seasonNth={currentSeasonNth}
-					tier={tiers.latest}
-					cut={hasBoth ? "END" : undefined}
-				/>
-			) : null}
-			{tiers.previous ? (
-				<PostSkillPill
-					seasonNth={currentSeasonNth - 1}
-					tier={tiers.previous}
-					cut={hasBoth ? "START" : undefined}
-				/>
-			) : null}
-		</div>
-	);
-}
-
-function PostSkillPill({
-	seasonNth,
-	tier,
-	cut,
-}: {
-	seasonNth: number;
-	tier: TieredSkill["tier"];
-	cut?: "START" | "END";
-}) {
-	return (
-		<div
-			className={clsx(styles.pill, styles.tierPill, {
-				[styles.tierPillStart]: cut === "START",
-				[styles.tierPillEnd]: cut === "END",
-			})}
-		>
-			S{seasonNth}
-			<TierImage tier={tier} width={32} className={styles.tier} />
-		</div>
-	);
-}
-
-function PostPlusServerPill({ plusTier }: { plusTier: number }) {
-	return (
-		<div className={styles.pill}>
-			<Image alt="" path={navIconUrl("plus")} size={18} />
-			{plusTier}
-		</div>
-	);
 }
 
 function PostTimezonePill({ timezone }: { timezone: string }) {
@@ -417,11 +315,9 @@ function PostTimezonePill({ timezone }: { timezone: string }) {
 	);
 }
 
-function PostLanguagePill({ languages }: { languages: string }) {
+function PostLanguagePill({ languages }: { languages: UnifiedLanguageCode[] }) {
 	return (
-		<div className={styles.pill}>
-			{languages.replace(/,/g, " / ").toUpperCase()}
-		</div>
+		<div className={styles.pill}>{languages.join(" / ").toUpperCase()}</div>
 	);
 }
 

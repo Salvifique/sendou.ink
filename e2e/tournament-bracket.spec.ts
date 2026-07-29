@@ -32,6 +32,7 @@ import {
 	expectScore,
 	goToTab,
 	navigateToMatch,
+	pickBanMap,
 	reportResult,
 	undoLastReport,
 } from "./helpers/tournament-match";
@@ -280,7 +281,7 @@ test.describe("Tournament bracket", () => {
 		await page.getByTestId("finalize-bracket-button").click();
 		await submit(page, "confirm-finalize-bracket-button");
 
-		for (const id of [2, 4, 6, 7, 8, 9, 10, 11, 12]) {
+		for (const id of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
 			await navigateToMatch(page, id);
 			await goToTab(page, "action");
 			await reportResult(page, { mapsToReport: 2 });
@@ -319,7 +320,7 @@ test.describe("Tournament bracket", () => {
 		await page.getByTestId("finalize-bracket-button").click();
 		await submit(page, "confirm-finalize-bracket-button");
 
-		await navigateToMatch(page, 13);
+		await navigateToMatch(page, 10);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 3 });
 
@@ -329,7 +330,7 @@ test.describe("Tournament bracket", () => {
 		});
 		await page.getByTestId("finalize-bracket-button").click();
 		await submit(page, "confirm-finalize-bracket-button");
-		for (const matchId of [14, 15, 16, 17]) {
+		for (const matchId of [11, 12, 13, 14]) {
 			await navigateToMatch(page, matchId);
 			await goToTab(page, "action");
 			await reportResult(page, { mapsToReport: 3 });
@@ -342,10 +343,40 @@ test.describe("Tournament bracket", () => {
 
 		// after finalizing the tournament, the admin tab disappears so the
 		// reopen action is no longer reachable
-		await navigateToMatch(page, 14);
+		await navigateToMatch(page, 11);
 		await isNotVisible(page.getByRole("tab", { name: "Admin" }));
 		await isNotVisible(page.getByTestId("reopen-match-button"));
 		await backToBracket(page);
+	});
+
+	test("starts a round robin bracket with unevenly sized groups (5 teams)", async ({
+		page,
+	}) => {
+		const tournamentId = 3;
+
+		await seed(page);
+		await impersonate(page);
+
+		await navigate({
+			page,
+			url: tournamentAdminPage(tournamentId),
+		});
+
+		// leave 5 checked in teams -> groups of 3 and 2 with different round counts
+		await checkOutTeamRows(page, 6, 15);
+
+		await navigate({
+			page,
+			url: tournamentBracketsPage({
+				tournamentId,
+			}),
+		});
+
+		await page.getByTestId("finalize-bracket-button").click();
+		await submit(page, "confirm-finalize-bracket-button");
+
+		// bracket starts without an "Invalid map count" error -> matches are rendered
+		await expect(page.locator("[data-match-id]").first()).toBeVisible();
 	});
 
 	test("shows tournament results on user profile after finalized tournament", async ({
@@ -441,12 +472,20 @@ test.describe("Tournament bracket", () => {
 		await page.getByTestId("finalize-bracket-button").click();
 		await submit(page, "confirm-finalize-bracket-button");
 
-		for (const matchId of [1, 2, 3, 4, 5, 6]) {
+		// every match of the group but one that Sendou's team is not part of
+		for (const matchId of [1, 2, 3, 4, 6]) {
 			await navigateToMatch(page, matchId);
 			await goToTab(page, "action");
 			await reportResult(page, { mapsToReport: 2 });
 			await backToBracket(page);
 		}
+
+		await expect(page.getByText("Waiting on group to finish")).toBeVisible();
+
+		await navigateToMatch(page, 5);
+		await goToTab(page, "action");
+		await reportResult(page, { mapsToReport: 2 });
+		await backToBracket(page);
 
 		await page.getByRole("tab", { name: "Hammerhead" }).click();
 		await isNotVisible(page.getByTestId("brackets-viewer"));
@@ -570,7 +609,7 @@ test.describe("Tournament bracket", () => {
 		await page.getByTestId("finalize-bracket-button").click();
 		await submit(page, "confirm-finalize-bracket-button");
 
-		await navigateToMatch(page, 2);
+		await navigateToMatch(page, 1);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 
@@ -635,32 +674,37 @@ test.describe("Tournament bracket", () => {
 		await page.getByTestId("finalize-bracket-button").click();
 		await submit(page, "confirm-finalize-bracket-button");
 
-		// needs also to be completed so 9 unlocks
-		await navigateToMatch(page, 7);
+		// needs also to be completed so 6 unlocks
+		await navigateToMatch(page, 4);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 		await backToBracket(page);
 
 		// set situation where match A is completed and its participants also completed their follow up matches B & C
 		// and then we go back and change the winner of A
-		await navigateToMatch(page, 8);
+		await navigateToMatch(page, 5);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 		await backToBracket(page);
 
-		await navigateToMatch(page, 9);
+		await navigateToMatch(page, 6);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 		await backToBracket(page);
 
-		await navigateToMatch(page, 10);
+		await navigateToMatch(page, 7);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 		await backToBracket(page);
 
-		await navigateToMatch(page, 8);
+		await navigateToMatch(page, 5);
 		await goToTab(page, "admin");
 		await submit(page, "reopen-match-button");
+		// Wait for the reopen to be reflected before switching tabs: switching
+		// tabs is a `defaultShouldRevalidate: false` navigation that would abort
+		// the still-in-flight post-reopen loader revalidation, leaving the match
+		// stuck as "over" so the action tab never appears.
+		await isNotVisible(page.getByTestId("reopen-match-button"));
 		await goToTab(page, "action");
 		await undoLastReport(page);
 		await reportResult(page, {
@@ -687,36 +731,36 @@ test.describe("Tournament bracket", () => {
 		await submit(page, "confirm-finalize-bracket-button");
 
 		// Use Group B which has 4 teams and 2 matches per round
-		// Group B Round 1: Match 7 (Whatcha Say vs Come Together), Match 8 (We Are Champions vs Please Mr Postman)
-		// Group B Round 2: Match 9 (Please Mr Postman vs Come Together), Match 10 (Whatcha Say vs We Are Champions)
+		// Group B Round 1: Match 4, Match 5
+		// Group B Round 2: Match 6, Match 7
 
-		// Complete R1 matches in group B (matches 7 and 8) to unlock R2 matches
-		await navigateToMatch(page, 7);
+		// Complete R1 matches in group B (matches 4 and 5) to unlock R2 matches
+		await navigateToMatch(page, 4);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 		await backToBracket(page);
 
-		await navigateToMatch(page, 8);
+		await navigateToMatch(page, 5);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 2 });
 		await backToBracket(page);
 
-		// Match 9 is R2 in group B - should now be unlocked since R1 is complete
+		// Match 6 is R2 in group B - should now be unlocked since R1 is complete
 		// Start it but don't complete it
-		await navigateToMatch(page, 9);
+		await navigateToMatch(page, 6);
 		await goToTab(page, "action");
 		await reportResult(page, { mapsToReport: 1, setEnds: false });
 		await backToBracket(page);
 
-		// Reopen match 7 (R1 match) - simulating a score misreport correction
-		await navigateToMatch(page, 7);
+		// Reopen match 4 (R1 match) - simulating a score misreport correction
+		await navigateToMatch(page, 4);
 		await goToTab(page, "admin");
 		await submit(page, "reopen-match-button");
 		await backToBracket(page);
 
 		// Verify the R2 match that was already in progress is still playable
 		// Before the fix, this would become locked and unplayable
-		await navigateToMatch(page, 9);
+		await navigateToMatch(page, 6);
 		await expectScore(page, [1, 0]);
 		await goToTab(page, "action");
 		await expect(page.getByTestId("winner-radio-1")).toBeVisible();
@@ -1031,8 +1075,7 @@ test.describe("Tournament bracket", () => {
 					});
 					await goToTab(page, "action");
 
-					await page.getByTestId("pick-ban-button").first().click();
-					await submit(page, "pick-ban-submit-button");
+					await pickBanMap(page);
 				}
 
 				// once both teams banned the ban prompt is gone and the actual map
@@ -1051,8 +1094,7 @@ test.describe("Tournament bracket", () => {
 			await reportResult(page, { mapsToReport: 1, winner: 2, setEnds: false });
 
 			if (pickBan === "COUNTERPICK") {
-				await page.getByTestId("pick-ban-button").first().click();
-				await submit(page, "pick-ban-submit-button");
+				await pickBanMap(page);
 			}
 
 			await impersonate(page, teamTwoCaptainId);
@@ -1066,8 +1108,7 @@ test.describe("Tournament bracket", () => {
 			await reportResult(page, { mapsToReport: 1, winner: 1, setEnds: false });
 
 			if (pickBan === "COUNTERPICK") {
-				await page.getByTestId("pick-ban-button").first().click();
-				await submit(page, "pick-ban-submit-button");
+				await pickBanMap(page);
 
 				await undoLastReport(page);
 				await expect(page.getByText("Select the winner")).toBeVisible();
@@ -1076,8 +1117,7 @@ test.describe("Tournament bracket", () => {
 					winner: 1,
 					setEnds: false,
 				});
-				await page.getByTestId("pick-ban-button").last().click();
-				await submit(page, "pick-ban-submit-button");
+				await pickBanMap(page, "last");
 				await expect(
 					page.getByText("Counterpick", { exact: true }),
 				).toBeVisible();
@@ -1239,12 +1279,10 @@ test.describe("Tournament bracket", () => {
 		});
 		await goToTab(page, "action");
 
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		await expect(page.getByText(/Ban a map \(2\/2\)/)).toBeVisible();
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		// 3) PreSet: Lower seed bans 2 maps
 		await impersonate(page, lowerSeedCaptainId);
@@ -1254,12 +1292,10 @@ test.describe("Tournament bracket", () => {
 		});
 		await goToTab(page, "action");
 
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		await expect(page.getByText(/Ban a map \(2\/2\)/)).toBeVisible();
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		// 4) Roll auto-executed after last ban; report game 1 score
 		await expect(page.getByTestId("stage-banner")).toBeVisible();
@@ -1270,12 +1306,10 @@ test.describe("Tournament bracket", () => {
 
 		// 5) PostGame: Winner (team 1, captain 33) bans 2 maps
 		await expect(page.getByText(/Ban a map/)).toBeVisible();
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		await expect(page.getByText(/Ban a map \(2\/2\)/)).toBeVisible();
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		// PostGame: Loser (team 2, captain 29) picks a map
 		await impersonate(page, higherSeedCaptainId);
@@ -1286,8 +1320,7 @@ test.describe("Tournament bracket", () => {
 		await goToTab(page, "action");
 
 		await expect(page.getByText(/Pick a map/)).toBeVisible();
-		await page.getByTestId("pick-ban-button").first().click();
-		await submit(page, "pick-ban-submit-button");
+		await pickBanMap(page);
 
 		// 6) Undo game 1 score — also deletes postGame pick/ban events
 		await expect(page.getByTestId("stage-banner")).toBeVisible();

@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, test, vi } from "vitest";
 import { render } from "vitest-browser-react";
-import type { GroupSkillDifference } from "~/db/tables";
+import type { GroupSkillDifference } from "~/db/tables-json";
 import type { TieredSkill } from "~/features/mmr/tiered.server";
 import type {
 	SQGroup,
@@ -29,11 +29,9 @@ function createMember(overrides: Partial<SQGroupMember> = {}): SQGroupMember {
 		languages: [],
 		skill: "CALCULATING",
 		weapons: [],
-		plusTier: null,
 		friendCode: null,
 		inGameName: null,
 		note: null,
-		privateNote: null,
 		pronouns: null,
 		skillDifference: undefined,
 		noScreen: undefined,
@@ -83,11 +81,9 @@ function createOwnGroupMember(
 		languages: [],
 		skill: "CALCULATING",
 		weapons: [],
-		plusTier: null,
 		friendCode: null,
 		inGameName: null,
 		note: null,
-		privateNote: null,
 		pronouns: null,
 		skillDifference: undefined,
 		noScreen: undefined,

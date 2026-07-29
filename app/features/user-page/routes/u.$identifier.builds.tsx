@@ -9,8 +9,11 @@ import { SendouMenu, SendouMenuItem } from "~/components/elements/Menu";
 import { FormMessage } from "~/components/FormMessage";
 import { Image, WeaponImage } from "~/components/Image";
 import { SubmitButton } from "~/components/SubmitButton";
-import { BUILD_SORT_IDENTIFIERS, type BuildSort } from "~/db/tables";
 import { useUser } from "~/features/auth/core/user";
+import {
+	BUILD_SORT_IDENTIFIERS,
+	type BuildSort,
+} from "~/features/user-page/user-page-constants";
 import { useSearchParamState } from "~/hooks/useSearchParamState";
 import type { MainWeaponId } from "~/modules/in-game-lists/types";
 import { mainWeaponIds } from "~/modules/in-game-lists/weapon-ids";
@@ -39,7 +42,7 @@ type BuildFilter = "ALL" | "PUBLIC" | "PRIVATE" | MainWeaponId;
 export default function UserBuildsPage() {
 	const { t } = useTranslation(["builds", "user"]);
 	const user = useUser();
-	const layoutData = useMatches().at(-2)!.data as UserPageLoaderData;
+	const layoutData = useMatches().at(-2)!.loaderData as UserPageLoaderData;
 	const data = useLoaderData<typeof loader>();
 	const [weaponFilter, setWeaponFilter] = useSearchParamState<BuildFilter>({
 		defaultValue: "ALL",
@@ -66,9 +69,9 @@ export default function UserBuildsPage() {
 		weaponFilter === "ALL"
 			? data.builds
 			: weaponFilter === "PUBLIC"
-				? data.builds.filter((build) => !build.private)
+				? data.builds.filter((build) => !build.isPrivate)
 				: weaponFilter === "PRIVATE"
-					? data.builds.filter((build) => build.private)
+					? data.builds.filter((build) => build.isPrivate)
 					: data.builds.filter((build) =>
 							build.weapons
 								.map((wpn) => wpn.weaponSplId)
@@ -122,12 +125,12 @@ function BuildsFilters({
 	const { t } = useTranslation(["weapons", "builds"]);
 	const data = useLoaderData<typeof loader>();
 	const user = useUser();
-	const layoutData = useMatches().at(-2)!.data as UserPageLoaderData;
+	const layoutData = useMatches().at(-2)!.loaderData as UserPageLoaderData;
 
 	if (data.builds.length === 0) return null;
 
 	const privateBuildsCount = data.builds.filter(
-		(build) => build.private,
+		(build) => build.isPrivate,
 	).length;
 	const publicBuildsCount = data.builds.length - privateBuildsCount;
 

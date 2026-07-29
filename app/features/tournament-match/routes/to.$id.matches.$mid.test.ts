@@ -100,8 +100,8 @@ describe("Tournament match page", () => {
 		await dbStartTournament([1, 2]);
 	});
 
-	afterEach(() => {
-		dbReset();
+	afterEach(async () => {
+		await dbReset();
 	});
 
 	describe("results", () => {
@@ -130,8 +130,7 @@ describe("Tournament match page", () => {
 				),
 				"Result participants should only include active roster user ids",
 			).toBeTruthy();
-			expect(result.opponentOnePoints).toBe(null);
-			expect(result.opponentTwoPoints).toBe(null);
+			expect(result.ko).toBe(null);
 			expect(result.winnerTeamId).toBe(1);
 		});
 
@@ -246,11 +245,26 @@ describe("Tournament match page", () => {
 		});
 	});
 
+	describe("locked match", () => {
+		it("should return error when reporting score for a match waiting on previous matches", async () => {
+			await setActiveRosterAction();
+			await db
+				.updateTable("TournamentMatch")
+				.set({ opponentOne: JSON.stringify({ id: null }) })
+				.where("id", "=", 1)
+				.execute();
+
+			const res = await reportScoreAction({ position: 0 });
+
+			assertResponseErrored(res, "Match is locked");
+		});
+	});
+
 	describe("BYE matches", () => {
 		it("should 404 when accessing a BYE match", async () => {
 			await db
 				.updateTable("TournamentMatch")
-				.set({ opponentTwo: JSON.stringify(null) })
+				.set({ opponentTwo: null })
 				.where("id", "=", 1)
 				.execute();
 

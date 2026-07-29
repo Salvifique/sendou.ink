@@ -56,13 +56,13 @@ const createXRankPlacement = async (args: {
 };
 
 describe("refreshAllPeakXp", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		placementCounter = 0;
-		dbReset();
+		await dbReset();
 	});
 
-	afterEach(() => {
-		dbReset();
+	afterEach(async () => {
+		await dbReset();
 	});
 
 	test("sets peakXp to max power for each player", async () => {
@@ -84,8 +84,37 @@ describe("refreshAllPeakXp", () => {
 			.orderBy("id", "asc")
 			.execute();
 
-		expect(players[0].peakXp).toBe(2700);
-		expect(players[1].peakXp).toBe(3000);
+		expect(players[0].peakXp).toEqual({
+			overall: 2700,
+			tentatek: 2700,
+			takoroka: null,
+		});
+		expect(players[1].peakXp).toEqual({
+			overall: 3000,
+			tentatek: 3000,
+			takoroka: null,
+		});
+	});
+
+	test("splits peakXp by division (region)", async () => {
+		const playerId = await createSplatoonPlayer("player1");
+
+		await createXRankPlacement({ playerId, power: 2700, region: "WEST" });
+		await createXRankPlacement({ playerId, power: 2900, region: "JPN" });
+
+		await XRankPlacementRepository.refreshAllPeakXp();
+
+		const player = await db
+			.selectFrom("SplatoonPlayer")
+			.select("peakXp")
+			.where("id", "=", playerId)
+			.executeTakeFirstOrThrow();
+
+		expect(player.peakXp).toEqual({
+			overall: 2900,
+			tentatek: 2700,
+			takoroka: 2900,
+		});
 	});
 
 	test("sets peakXp to null for player with no placements", async () => {
@@ -104,13 +133,13 @@ describe("refreshAllPeakXp", () => {
 });
 
 describe("refreshTenStarWeapons", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		placementCounter = 0;
-		dbReset();
+		await dbReset();
 	});
 
-	afterEach(() => {
-		dbReset();
+	afterEach(async () => {
+		await dbReset();
 	});
 
 	test("JPN placement qualifies regardless of rank", async () => {
@@ -219,13 +248,13 @@ describe("refreshTenStarWeapons", () => {
 });
 
 describe("refreshTenStarWeapons with userId", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		placementCounter = 0;
-		dbReset();
+		await dbReset();
 	});
 
-	afterEach(() => {
-		dbReset();
+	afterEach(async () => {
+		await dbReset();
 	});
 
 	test("only affects the target user", async () => {

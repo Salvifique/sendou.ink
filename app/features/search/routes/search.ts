@@ -56,7 +56,7 @@ async function searchByType({
 				type: "user" as const,
 				id: u.id,
 				name: u.username,
-				secondaryName: u.inGameName,
+				inGameName: u.inGameName,
 				avatarUrl: null,
 				discordId: u.discordId,
 				discordAvatar: u.discordAvatar,
@@ -98,7 +98,7 @@ async function searchByType({
 				id: t.id,
 				name: t.name,
 				logoUrl: t.logoUrl,
-				startTime: t.startTime,
+				startsAt: t.startsAt,
 			}));
 		}
 	}

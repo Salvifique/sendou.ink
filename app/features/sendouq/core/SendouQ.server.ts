@@ -1,11 +1,11 @@
 import { isWithinInterval, sub } from "date-fns";
 import * as R from "remeda";
-import type { DBBoolean, ParsedMemento, Tables } from "~/db/tables";
+import type { DBBoolean, Tables } from "~/db/tables";
+import type { ParsedMemento } from "~/db/tables-json";
 import type { AuthenticatedUser } from "~/features/auth/core/user.server";
 import * as Seasons from "~/features/mmr/core/Seasons";
 import { defaultOrdinal } from "~/features/mmr/mmr-utils";
 import { type TieredSkill, userSkills } from "~/features/mmr/tiered.server";
-import type * as PrivateUserNoteRepository from "~/features/sendouq/PrivateUserNoteRepository.server";
 import * as SQGroupRepository from "~/features/sendouq/SQGroupRepository.server";
 import * as SendouQMatch from "~/features/sendouq-match/core/SendouQMatch";
 import type * as SQMatchRepository from "~/features/sendouq-match/SQMatchRepository.server";
@@ -21,9 +21,6 @@ import { tierDifferenceToRangeOrExact } from "./groups.server";
 
 type DBGroupRow = Awaited<
 	ReturnType<typeof SQGroupRepository.findCurrentGroups>
->[number];
-type DBPrivateNoteRow = Awaited<
-	ReturnType<typeof PrivateUserNoteRepository.ownNotes>
 >[number];
 type DBRecentlyFinishedMatchRow = Awaited<
 	ReturnType<typeof SQGroupRepository.findRecentlyFinishedMatches>
@@ -42,7 +39,6 @@ export type SQOwnGroup = SerializeFrom<
 	NonNullable<ReturnType<SendouQClass["findOwnGroup"]>>
 >;
 export type SQMatch = SerializeFrom<ReturnType<SendouQClass["mapMatch"]>>;
-export type SQMatchGroup = SQMatch["groupAlpha"] | SQMatch["groupBravo"];
 export type SQGroupMember = NonNullable<SQGroup["members"]>[number];
 
 const FALLBACK_TIER = { isPlus: false, name: "IRON" } as const;
@@ -61,14 +57,12 @@ class SendouQClass {
 	constructor(
 		groups: DBGroupRow[],
 		recentMatches: DBRecentlyFinishedMatchRow[],
-	) {
-		const season = Seasons.currentOrPrevious();
-		const {
+		{
 			intervals,
 			userSkills: calculatedUserSkills,
 			isAccurateTiers,
-		} = userSkills(season!.nth);
-
+		}: Awaited<ReturnType<typeof userSkills>>,
+	) {
 		this.#recentMatches = recentMatches;
 		this.#isAccurateTiers = isAccurateTiers;
 		this.#userSkills = calculatedUserSkills;
@@ -91,8 +85,7 @@ class SendouQClass {
 
 				return {
 					...member,
-					privateNote: null as DBPrivateNoteRow | null,
-					languages: member.languages?.split(",") || [],
+					languages: member.languages ?? [],
 					skill: !skill || skill.approximate ? ("CALCULATING" as const) : skill,
 					mapModePreferences: undefined,
 					noScreen: undefined,
@@ -165,8 +158,6 @@ class SendouQClass {
 		match: DBMatch,
 		/** The authenticated user viewing the match (if any) */
 		user?: AuthenticatedUser,
-		/** Array of private user notes to include */
-		notes: DBPrivateNoteRow[] = [],
 	) {
 		const viewerSide = SendouQMatch.resolveGroupMemberOf({
 			groupAlpha: match.groupAlpha,
@@ -191,7 +182,6 @@ class SendouQClass {
 			return {
 				...group,
 				chatCode: isTeamMember ? group.chatCode : undefined,
-				noScreen: this.#groupNoScreen(group),
 				tier: match.memento?.groups[group.id]?.tier,
 				skillDifference: match.memento?.groups[group.id]?.skillDifference,
 				matchmade: Boolean(group.matchmade),
@@ -199,7 +189,6 @@ class SendouQClass {
 					return {
 						...member,
 						skill: match.memento?.users[member.id]?.skill,
-						privateNote: null as DBPrivateNoteRow | null,
 						skillDifference: match.memento?.users[member.id]?.skillDifference,
 						noScreen: undefined,
 						isContinuing:
@@ -243,9 +232,10 @@ class SendouQClass {
 		return {
 			...match,
 			chatCode: isMatchInsider ? match.chatCode : undefined,
+			noScreen: Boolean(match.noScreen),
 			currentMap,
-			groupAlpha: this.#getAddMemberPrivateNoteMapper(notes)(alphaCensored),
-			groupBravo: this.#getAddMemberPrivateNoteMapper(notes)(bravoCensored),
+			groupAlpha: alphaCensored,
+			groupBravo: bravoCensored,
 		};
 	}
 
@@ -256,14 +246,11 @@ class SendouQClass {
 	previewGroups(
 		/** The ID of the user viewing the preview */
 		userId: number,
-		/** Array of private user notes to include */
-		notes: DBPrivateNoteRow[],
 	) {
 		const usersTier = this.#getUserTier(userId);
 		return this.groups
 			.filter((group) => this.#isSuitableLookingGroup({ group }))
-			.map(this.#getAddMemberPrivateNoteMapper(notes))
-			.sort(this.#getSkillAndNoteSortComparator(usersTier))
+			.sort(this.#getSkillSortComparator(usersTier))
 			.map((group) => this.#addPreviewTierRange(group))
 			.map((group) => this.#censorGroup(group));
 	}
@@ -271,14 +258,12 @@ class SendouQClass {
 	/**
 	 * Returns groups that are available for matchmaking for a specific user based on their current group size.
 	 * Filters groups based on member count compatibility, activity status, and excludes stale groups.
-	 * Results are sorted by sentiment (notes), tier difference, and activity.
+	 * Results are sorted by tier difference and activity.
 	 * @returns Array of compatible groups sorted by relevance, or empty array if user has no group
 	 */
 	lookingGroups(
 		/** The ID of the user looking for groups */
 		userId: number,
-		/** Array of private user notes to include */
-		notes: DBPrivateNoteRow[] = [],
 	) {
 		const ownGroup = this.findOwnGroup(userId);
 		if (!ownGroup) return [];
@@ -302,8 +287,7 @@ class SendouQClass {
 			)
 			.map(this.#getGroupReplayMapper(userId))
 			.map(this.#getAddTierRangeMapper(ownGroup.tier))
-			.map(this.#getAddMemberPrivateNoteMapper(notes))
-			.sort(this.#getSkillAndNoteSortComparator(ownGroup.tier))
+			.sort(this.#getSkillSortComparator(ownGroup.tier))
 			.map((group) => this.#censorGroup(group));
 	}
 
@@ -416,27 +400,10 @@ class SendouQClass {
 		return skill.tier;
 	}
 
-	#getAddMemberPrivateNoteMapper(notes: DBPrivateNoteRow[]) {
-		return <T extends { members: { id: number }[] }>(group: T) => {
-			const membersWithNotes = group.members.map((member) => {
-				const note = notes.find((n) => n.targetUserId === member.id);
-				return {
-					...member,
-					privateNote: note ?? null,
-				};
-			});
-
-			return {
-				...group,
-				members: membersWithNotes,
-			};
-		};
-	}
-
-	#getSkillAndNoteSortComparator(ownTier?: TieredSkill["tier"] | null) {
+	#getSkillSortComparator(ownTier?: TieredSkill["tier"] | null) {
 		return <
 			T extends {
-				members: { privateNote: DBPrivateNoteRow | null }[];
+				members: unknown[];
 				tierRange: TierRange | null;
 				tier: TieredSkill["tier"] | null;
 				latestActionAt: number;
@@ -450,26 +417,6 @@ class SendouQClass {
 
 			if (aIsFull !== bIsFull) {
 				return aIsFull ? 1 : -1;
-			}
-
-			const getGroupSentimentScore = (group: T) => {
-				const hasNegative = group.members.some(
-					(m) => m.privateNote?.sentiment === "NEGATIVE",
-				);
-				const hasPositive = group.members.some(
-					(m) => m.privateNote?.sentiment === "POSITIVE",
-				);
-
-				if (hasNegative) return -1;
-				if (hasPositive) return 1;
-				return 0;
-			};
-
-			const scoreA = getGroupSentimentScore(a);
-			const scoreB = getGroupSentimentScore(b);
-
-			if (scoreA !== scoreB) {
-				return scoreB - scoreA;
 			}
 
 			if (a.tierRange && b.tierRange) {
@@ -640,17 +587,25 @@ class SendouQClass {
 	}
 }
 
-const groups = await SQGroupRepository.findCurrentGroups();
-const recentMatches = await SQGroupRepository.findRecentlyFinishedMatches();
 /** Global instance of the SendouQ manager. Manages all active groups and matchmaking state. */
-export let SendouQ = new SendouQClass(groups, recentMatches);
+export let SendouQ = await freshSendouQInstance();
 
 /**
  * Refreshes the global SendouQ instance with the latest data from the database.
  * Should be called after any database changes that affect groups or matches.
  */
 export async function refreshSendouQInstance() {
-	const groups = await SQGroupRepository.findCurrentGroups();
-	const recentMatches = await SQGroupRepository.findRecentlyFinishedMatches();
-	SendouQ = new SendouQClass(groups, recentMatches);
+	SendouQ = await freshSendouQInstance();
+}
+
+async function freshSendouQInstance() {
+	const season = Seasons.currentOrPrevious();
+
+	const [groups, recentMatches, skills] = await Promise.all([
+		SQGroupRepository.findCurrentGroups(),
+		SQGroupRepository.findRecentlyFinishedMatches(),
+		userSkills(season!.nth),
+	]);
+
+	return new SendouQClass(groups, recentMatches, skills);
 }

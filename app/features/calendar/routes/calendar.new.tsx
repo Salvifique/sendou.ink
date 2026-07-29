@@ -34,12 +34,14 @@ import { loader } from "../loaders/calendar.new.server";
 export { action, loader };
 
 export const meta: MetaFunction<typeof loader> = (args) => {
-	if (!args.data) return [];
+	if (!args.loaderData) return [];
 
-	const what = args.data.isAddingTournament ? "tournament" : "calendar event";
+	const what = args.loaderData.isAddingTournament
+		? "tournament"
+		: "calendar event";
 
 	return metaTags({
-		title: args.data.eventToEdit ? `Editing ${what}` : `New ${what}`,
+		title: args.loaderData.eventToEdit ? `Editing ${what}` : `New ${what}`,
 		location: args.location,
 	});
 };
@@ -140,7 +142,7 @@ function useDefaultValues() {
 
 	const regClosesAt: RegClosesAtOption = tournamentCtx?.settings.regClosesAt
 		? datesToRegClosesAt({
-				startTime: databaseTimestampToDate(tournamentCtx.startTime),
+				startTime: databaseTimestampToDate(tournamentCtx.startsAt),
 				regClosesAt: databaseTimestampToDate(
 					tournamentCtx.settings.regClosesAt,
 				),
@@ -241,7 +243,7 @@ function TemplateTournamentForm() {
 						<option value="">Select a template</option>
 						{recentTournaments.map((event) => (
 							<option key={event.id} value={event.id}>
-								{event.name} ({formatter.format(event.startTime) ?? ""})
+								{event.name} ({formatter.format(event.startsAt) ?? ""})
 							</option>
 						))}
 					</select>

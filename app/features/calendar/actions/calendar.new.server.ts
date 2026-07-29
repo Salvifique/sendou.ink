@@ -1,6 +1,5 @@
 import type { ActionFunction } from "react-router";
 import { redirect } from "react-router";
-import type { CalendarEventTag } from "~/db/tables";
 import { requireUser } from "~/features/auth/core/user.server";
 import * as BadgeRepository from "~/features/badges/BadgeRepository.server";
 import * as CalendarRepository from "~/features/calendar/CalendarRepository.server";
@@ -44,6 +43,7 @@ export const action: ActionFunction = async ({ request }) => {
 
 	const isEditing = Boolean(data.eventToEditId);
 	const isAddingTournament = data.toToolsEnabled;
+	const isTournamentAdder = user.roles.includes("TOURNAMENT_ADDER");
 	const organizationId = data.organizationId
 		? Number(data.organizationId)
 		: null;
@@ -52,7 +52,7 @@ export const action: ActionFunction = async ({ request }) => {
 		await validateOrganization({
 			userId: user.id,
 			organizationId,
-			isTournamentAdder: user.roles.includes("TOURNAMENT_ADDER"),
+			isTournamentAdder,
 		});
 	} else if (!isEditing) {
 		requireRole(
@@ -78,13 +78,10 @@ export const action: ActionFunction = async ({ request }) => {
 			: data.discordInviteCode,
 		tags:
 			data.tags.length > 0
-				? data.tags
-						.toSorted(
-							(a, b) =>
-								CALENDAR_EVENT.TAGS.indexOf(a as CalendarEventTag) -
-								CALENDAR_EVENT.TAGS.indexOf(b as CalendarEventTag),
-						)
-						.join(",")
+				? data.tags.toSorted(
+						(a, b) =>
+							CALENDAR_EVENT.TAGS.indexOf(a) - CALENDAR_EVENT.TAGS.indexOf(b),
+					)
 				: null,
 		badges: data.badges.filter((badge) =>
 			managedBadges.some((mb) => mb.id === badge),
@@ -141,7 +138,10 @@ export const action: ActionFunction = async ({ request }) => {
 				"Tournament has already started",
 			);
 
-			errorToastIfFalsy(tournament.isAdmin(user), "Not authorized");
+			errorToastIfFalsy(
+				tournament.canEditEventInfo(user, { isTournamentAdder }),
+				"Not authorized",
+			);
 
 			// once published, a tournament can't be flipped back to draft
 			if (!tournament.isDraft) {
@@ -175,7 +175,7 @@ export const action: ActionFunction = async ({ request }) => {
 		return "AUTO_ALL" as const;
 	};
 	const { eventId: createdEventId, tournamentId: createdTournamentId } =
-		await CalendarRepository.create({
+		await CalendarRepository.insert({
 			mapPoolMaps: deserializedMaps,
 			isFullTournament: data.toToolsEnabled,
 			mapPickingStyle: mapPickingStyle(),

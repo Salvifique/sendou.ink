@@ -1,6 +1,6 @@
 import { db } from "~/db/sql";
 import type { Tables, TablesInsertable } from "~/db/tables";
-import { commonUserSelect } from "~/utils/kysely.server";
+import { commonUserSelect, peakXpOverallSql } from "~/utils/kysely.server";
 import * as StreamRanking from "../sidebar/core/StreamRanking";
 
 export function replaceAll(
@@ -34,15 +34,11 @@ export function findXRankStreams() {
 		.selectFrom("LiveStream")
 		.innerJoin("User", "User.twitch", "LiveStream.twitch")
 		.innerJoin("SplatoonPlayer", "SplatoonPlayer.userId", "User.id")
-		.where(
-			"SplatoonPlayer.peakXp",
-			">=",
-			StreamRanking.minXpForStreamToBeShown(),
-		)
+		.where(peakXpOverallSql(), ">=", StreamRanking.minXpForStreamToBeShown())
 		.where("LiveStream.twitch", "is not", null)
 		.select((eb) => [
 			...commonUserSelect(eb),
-			"SplatoonPlayer.peakXp",
+			peakXpOverallSql<number>().as("peakXp"),
 			"LiveStream.viewerCount",
 			"LiveStream.thumbnailUrl",
 			"LiveStream.twitch as twitchUsername",

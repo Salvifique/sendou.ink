@@ -23,6 +23,10 @@
 	"stat.specialPoints": "נקודות לספיישל",
 	"stat.specialLost": "כמות נקודות שנאבדו לאחר שנותז",
 	"stat.specialLostSplattedByRP": "כמות נקודות שנאבדו לאחר שנותז על ידי שחקן עם RP",
+	"stat.tenacitySecondsToSpecial_one": "",
+	"stat.tenacitySecondsToSpecial_two": "",
+	"stat.tenacitySecondsToSpecial_other": "",
+	"stat.tenacitySecondsToSpecial.explanation": "",
 	"stat.whiteInk": "זמן ללא שחזור דיו לאחר שימוש",
 	"stat.subWeaponInkConsumptionPercentage": "צריכת דיו מהמיכל",
 	"stat.squidFormInkRecoverySeconds": "זמן התאוששות מלא של מיכל הדיו (צורת דיונון)",
@@ -211,5 +215,6 @@
 	"comp.specialCategory.TEAM_SHIELD": "מגן הקבוצה",
 	"comp.specialCategory.TEAM_BUFF": "חיזוק הקבוצה",
 	"comp.removeAll": "הסר הכל",
-	"comp.addAll": "הוסף הכל"
+	"comp.addAll": "הוסף הכל",
+	"comp.singleWeaponCombos": ""
 }

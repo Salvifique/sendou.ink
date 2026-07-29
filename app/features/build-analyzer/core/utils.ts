@@ -51,6 +51,14 @@ export function mainWeaponParams(weaponId: MainWeaponId): MainWeaponParams {
 	return { ...baseStats, ...kit } as MainWeaponParams;
 }
 
+export function specialWeaponParams(
+	specialWeaponId: SpecialWeaponId,
+): SpecialWeaponParams {
+	const params = rawWeaponParams as unknown as ParamsJson;
+
+	return params.specialWeapons[specialWeaponId] as SpecialWeaponParams;
+}
+
 export function buildToAbilityPoints(build: BuildAbilitiesTupleWithUnknown) {
 	const result: AbilityPoints = new Map();
 
@@ -312,13 +320,6 @@ export function validatedBuildFromSearchParams(
 	} catch {
 		return EMPTY_BUILD;
 	}
-}
-
-export function serializeBuild(build: BuildAbilitiesTupleWithUnknown) {
-	return build
-		.flat()
-		.map((ability) => (ability === "UNKNOWN" ? UNKNOWN_SHORT : ability))
-		.join(",");
 }
 
 export const hpDivided = (hp: number) => hp / 10;
